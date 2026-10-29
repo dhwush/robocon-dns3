@@ -1,0 +1,7 @@
+# 雷达确认地图已经和场地对齐之后，把 aligned 改成 true。
+# center_to_corner 是小车中心到右前角的水平偏移，向右、向前，单位米。用尺子量，不能填 0。
+aligned: false
+topic: ""
+yaw_unit: rad
+center_to_corner:
+pitch_deg: 0.0

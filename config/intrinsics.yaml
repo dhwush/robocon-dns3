@@ -1,0 +1,9 @@
+# 与任务二同一台彩色相机，1280×720，畸变系数为 0。
+width: 1280
+height: 720
+fx: 909.7513
+fy: 909.8418
+cx: 633.1354
+cy: 376.0774
+distortion_model: inverse_brown_conrady
+D: [0.0, 0.0, 0.0, 0.0, 0.0]
