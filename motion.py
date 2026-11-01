@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 
 from car_pose import CarPose, camera_position, shifted_pose
-from classify import CellView
+from classify import MIN_VISIBLE_M, CellView
 from field_map import all_cells, tower_cells
-from sight import sees
+from sight import visible_height
 
 
 def format_yaw(bearing_deg: float) -> str:
@@ -60,7 +60,11 @@ def slide_for(
             moved = shifted_pose(pose, lateral)
             if _on_platform(camera_position(moved, offset, pitch)):
                 continue
-            cleared = sum(1 for cell in wanted if sees(moved, offset, pitch, cell, 0.55))
+            cleared = sum(
+                1
+                for cell in wanted
+                if visible_height(moved, offset, pitch, cell, cell.base_z, cell.one_z) >= MIN_VISIBLE_M
+            )
             if cleared == 0:
                 continue
             rank = (cleared, -abs(lateral))

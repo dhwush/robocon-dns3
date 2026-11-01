@@ -19,13 +19,13 @@ RED = ((0, 150, 120), (8, 255, 255))
 RED_WRAP = ((172, 150, 120), (180, 255, 255))
 BLUE = ((105, 150, 50), (130, 255, 255))
 
-ONE_Z = (0.20, 0.55)
-TWO_Z = (0.20, 0.90)
 WIDTH_M = 0.35
 WIDTH_TOL_M = 0.10
 VIEW_FRACTION = 0.70
 # 可见高度小于 8 cm 的那一档，当成没看见。
 MIN_VISIBLE_M = 0.08
+# 白盒 0.35 m，两层 0.70 m，塔顶再高 0.20 m。搜索框比塔顶再高出 0.10 m。
+_TOP_MARGIN_M = 0.10
 
 
 @dataclass
@@ -39,6 +39,8 @@ class CellView:
     pitch_target_deg: float
     white_frac: float
     mean_v: float
+    region: np.ndarray | None = None
+    piece: np.ndarray | None = None
 
 
 def heights_match(measured: float, predicted: float) -> bool:
@@ -48,7 +50,7 @@ def heights_match(measured: float, predicted: float) -> bool:
 
 
 def _samples(cell: Cell) -> list[tuple[float, float]]:
-    x0, x1, y0, y1 = cell.bounds(MARGIN_M)
+    x0, x1, y0, y1 = cell.search_bounds(MARGIN_M)
     xs = np.linspace(x0, x1, 5)
     ys = np.linspace(y0, y1, 5)
     return [(float(x), float(y)) for x in xs for y in ys]
@@ -66,9 +68,9 @@ def _bearing_deg(point: np.ndarray, pose: CarPose, offset: np.ndarray, pitch: fl
 
 
 def _pitch_target(cell: Cell, pose: CarPose, offset: np.ndarray) -> float:
-    # 0.2 m 和 1.1 m 的中点抬到相对水平的角度。这是要转到的角度。
+    # 台面（或地面）到塔顶的中点，抬到相对水平的角度。这是要转到的角度。
     origin_z = 0.70
-    mid = cell.center(0.65)
+    mid = cell.center((cell.base_z + cell.cap_z) / 2.0)
     flat = np.array([mid[0], mid[1], origin_z], dtype=float)
     cam = to_camera(mid, pose, offset, 0.0)
     ahead = to_camera(flat, pose, offset, 0.0)
@@ -79,16 +81,18 @@ def _pitch_target(cell: Cell, pose: CarPose, offset: np.ndarray) -> float:
 def _mask(cell: Cell, pose: CarPose, offset: np.ndarray, pitch: float, intr: Intrinsics) -> np.ndarray:
     shape = (intr.height, intr.width)
     pixels = []
-    x0, x1, y0, y1 = cell.bounds(MARGIN_M)
+    x0, x1, y0, y1 = cell.search_bounds(MARGIN_M)
+    low_z = cell.base_z
+    high_z = cell.cap_z + _TOP_MARGIN_M
     for x, y, z in (
-        (x0, y0, 0.20),
-        (x1, y0, 0.20),
-        (x1, y1, 0.20),
-        (x0, y1, 0.20),
-        (x0, y0, 1.20),
-        (x1, y0, 1.20),
-        (x1, y1, 1.20),
-        (x0, y1, 1.20),
+        (x0, y0, low_z),
+        (x1, y0, low_z),
+        (x1, y1, low_z),
+        (x0, y1, low_z),
+        (x0, y0, high_z),
+        (x1, y0, high_z),
+        (x1, y1, high_z),
+        (x0, y1, high_z),
     ):
         pixel = project(np.array([x, y, z]), pose, offset, pitch, intr)
         if pixel is not None:
@@ -107,8 +111,8 @@ def _view_flags(cell: Cell, pose: CarPose, offset: np.ndarray, pitch: float, int
     total = 0
     for x, y in _samples(cell):
         total += 1
-        low = project(np.array([x, y, 0.20]), pose, offset, pitch, intr)
-        high = project(np.array([x, y, 1.10]), pose, offset, pitch, intr)
+        low = project(np.array([x, y, cell.base_z]), pose, offset, pitch, intr)
+        high = project(np.array([x, y, cell.cap_z]), pose, offset, pitch, intr)
         low_h = low is not None and 0.0 <= float(low[0]) < intr.width
         high_h = high is not None and 0.0 <= float(high[0]) < intr.width
         if low_h and high_h:
@@ -173,6 +177,15 @@ def _depth_ok(depth: np.ndarray | None, ys: np.ndarray, xs: np.ndarray, z_cam: f
     return measured
 
 
+def _outline(mask: np.ndarray) -> np.ndarray | None:
+    if mask.size == 0 or int(mask.max()) == 0:
+        return None
+    found, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not found:
+        return None
+    return max(found, key=cv2.contourArea)
+
+
 def _classify_cell(
     cell: Cell,
     pose: CarPose,
@@ -183,23 +196,41 @@ def _classify_cell(
     depth: np.ndarray | None,
 ) -> CellView:
     in_view, needs_yaw, needs_pitch = _view_flags(cell, pose, offset, pitch, intr)
-    blocked = not sees(pose, offset, pitch, cell, 0.55)
-    bearing = _bearing_deg(cell.center(0.55), pose, offset, pitch)
+    # 一层只露出不到 8 cm 时，这一档不能写成空，也不能写成一层。
+    one_h = visible_height(pose, offset, pitch, cell, cell.base_z, cell.one_z)
+    blocked = one_h < MIN_VISIBLE_M
+    bearing = _bearing_deg(cell.center(cell.one_z), pose, offset, pitch)
     pitch_target = _pitch_target(cell, pose, offset)
-    empty = CellView(None, in_view, needs_yaw, needs_pitch, blocked, bearing, pitch_target, 0.0, 255.0)
-    if color is None or not in_view:
-        return empty
     mask = _mask(cell, pose, offset, pitch, intr)
+    region = _outline(mask)
+
+    def pack(conclusion, frac: float, mean_v: float, piece=None) -> CellView:
+        return CellView(
+            conclusion,
+            in_view,
+            needs_yaw,
+            needs_pitch,
+            blocked,
+            bearing,
+            pitch_target,
+            frac,
+            mean_v,
+            region,
+            piece,
+        )
+
+    if color is None or not in_view:
+        return pack(None, 0.0, 255.0)
     white = _white_mask(color)
     inside = (white > 0) & (mask > 0)
     area = int(np.count_nonzero(mask))
     frac = 0.0 if area == 0 else float(np.count_nonzero(inside)) / float(area)
     hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
     mean_v = 255.0 if area == 0 else float(np.mean(hsv[:, :, 2][mask > 0]))
-    cam = to_camera(cell.center(0.55), pose, offset, pitch)
+    cam = to_camera(cell.center(cell.one_z), pose, offset, pitch)
     z_cam = float(cam[2])
     if z_cam <= 0.2:
-        return empty
+        return pack(None, 0.0, 255.0)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(inside.astype(np.uint8), connectivity=8)
     best = None
     best_width = None
@@ -218,28 +249,27 @@ def _classify_cell(
         if best_width is None or abs(width_m - WIDTH_M) < abs(best_width - WIDTH_M):
             best = (x, y, w, h, distance, component)
             best_width = width_m
-    base = CellView(None, in_view, needs_yaw, needs_pitch, blocked, bearing, pitch_target, frac, mean_v)
     if best is None:
         if blocked:
-            return base
-        return CellView("0", in_view, needs_yaw, needs_pitch, blocked, bearing, pitch_target, frac, mean_v)
-    _x, y, _w, h, distance, _component = best
+            return pack(None, frac, mean_v)
+        return pack("0", frac, mean_v)
+    _x, y, _w, h, distance, component = best
+    piece = _outline(component.astype(np.uint8) * 255)
     height_m = _metric(h, distance, intr.fy)
-    one_h = visible_height(pose, offset, pitch, cell, *ONE_Z)
-    two_h = visible_height(pose, offset, pitch, cell, *TWO_Z)
+    two_h = visible_height(pose, offset, pitch, cell, cell.base_z, cell.two_z)
     one_ok = (not blocked) and heights_match(height_m, one_h)
     two_ok = heights_match(height_m, two_h)
     if not one_ok and not two_ok:
-        return base
+        return pack(None, frac, mean_v)
     if one_ok and two_ok:
         use_two = abs(height_m - two_h) <= abs(height_m - one_h)
     else:
         use_two = two_ok
     if not use_two:
-        return CellView("1", in_view, needs_yaw, needs_pitch, blocked, bearing, pitch_target, frac, mean_v)
+        return pack("1", frac, mean_v, piece)
     faction = _faction(color, mask, y, y + h, distance, intr)
     state = faction if faction is not None else "2"
-    return CellView(state, in_view, needs_yaw, needs_pitch, blocked, bearing, pitch_target, frac, mean_v)
+    return pack(state, frac, mean_v, piece)
 
 
 def inspect_frame(

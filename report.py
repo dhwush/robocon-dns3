@@ -4,12 +4,26 @@ from __future__ import annotations
 
 from car_pose import CarPose, Intrinsics, Setup, pose_moved
 from classify import inspect_frame
-from field_map import DISPLAY
+from field_map import DISPLAY, TOWER_NO
 from motion import next_action
 from vote import Vote
 
 
 LEVELS = ("bright", "daylight", "indoor", "dim", "dark")
+LIGHT_WORDS = {
+    "bright": "很亮",
+    "daylight": "白天",
+    "indoor": "室内",
+    "dim": "偏暗",
+    "dark": "很暗",
+}
+STATE_WORDS = {
+    "0": "空的，没有白盒",
+    "1": "一层白盒",
+    "2": "两层白盒",
+    "红": "两层白盒，顶上是红的",
+    "蓝": "两层白盒，顶上是蓝的",
+}
 LEVEL_LOCK = {
     "bright": {"exposure": 25, "gain": 0, "brightness": -16},
     "daylight": {"exposure": 50, "gain": 16, "brightness": 0},
@@ -17,6 +31,41 @@ LEVEL_LOCK = {
     "dim": {"exposure": 400, "gain": 48, "brightness": 12},
     "dark": {"exposure": 1200, "gain": 72, "brightness": 24},
 }
+
+
+def light_hint(level: str) -> str:
+    # 数字和档位顺序一致，和任务二的测试窗口一样。
+    current = LIGHT_WORDS[level]
+    exposure = float(LEVEL_LOCK[level]["exposure"])
+    choices = "  ".join(f"{index}{LIGHT_WORDS[name]}" for index, name in enumerate(LEVELS, start=1))
+    return f"光线 {current}，曝光 {exposure:.0f}。按 {choices}。q 退出"
+
+
+def light_from_key(key: int) -> str | None:
+    index = int(key) - ord("1")
+    if 0 <= index < len(LEVELS):
+        return LEVELS[index]
+    return None
+
+
+def plain_state(view, locked: str | None, mode: str) -> str:
+    if mode == "basic":
+        if locked and view.in_view:
+            return STATE_WORDS[locked]
+        if view.blocked and not locked:
+            return "被挡住了，这一眼不写结论"
+        return "还没写下"
+    if locked:
+        return STATE_WORDS[locked]
+    if not view.in_view and view.needs_yaw:
+        return "不在画面里，要先转向"
+    if view.needs_pitch:
+        return "高度不在画面里，要改俯仰"
+    if view.blocked and view.conclusion is None:
+        return "被前面的台挡住了，还不能确定"
+    if view.conclusion is None:
+        return "还没看清"
+    return f"这一眼像是{STATE_WORDS[view.conclusion]}，还要再看几帧"
 
 
 def step_light(level: str, white_frac: float, mean_v: float, wait: int) -> tuple[str, int]:
@@ -40,8 +89,17 @@ class FieldWatch:
         self.last_pose: CarPose | None = None
         self.light = "daylight"
         self.light_wait = 0
+        self.light_hand = False
         self.views = None
         self.have_color = False
+
+    def choose_light(self, level: str) -> None:
+        # 人按过数字键之后，不再自动改档，免得和手上的选择对着干。
+        if level not in LEVELS:
+            return
+        self.light = level
+        self.light_hand = True
+        self.light_wait = 0
 
     def update(self, pose: CarPose, color=None, depth=None) -> None:
         if not self.setup.ready or self.setup.center_to_corner is None:
@@ -62,8 +120,9 @@ class FieldWatch:
         )
         frac = max((view.white_frac for view in self.views.values()), default=0.0)
         mean_v = min((view.mean_v for view in self.views.values()), default=255.0)
-        if color is not None:
+        if color is not None and not self.light_hand:
             self.light, self.light_wait = step_light(self.light, frac, mean_v, self.light_wait)
+        if color is not None:
             for name, view in self.views.items():
                 self.votes[name].see(view.conclusion)
 
@@ -88,5 +147,20 @@ class FieldWatch:
         )
         if action:
             rows.append(action)
+        return rows
+
+    def window_lines(self, mode: str) -> list[str]:
+        official = self.lines(mode)
+        hint = light_hint(self.light)
+        if official == ["车位还没对齐"]:
+            return ["车位还没对齐，先不要认塔。", hint]
+        rows = [hint]
+        if self.views is None:
+            return rows + official
+        locked = {name: vote.locked for name, vote in self.votes.items()}
+        for name in sorted(DISPLAY, key=lambda item: TOWER_NO[item]):
+            rows.append(f"{TOWER_NO[name]}：{plain_state(self.views[name], locked[name], mode)}")
+        if mode == "extend" and len(official) == len(DISPLAY) + 1:
+            rows.append(official[-1])
         return rows
 

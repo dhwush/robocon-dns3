@@ -1,10 +1,12 @@
 """任务三的两条实地指令，启动方式不同。
 
-基础：人把车摆在原点，车头朝前。不订雷达。
+基础：人把右前角摆在场地原点右侧 1.2 米，前后对齐，车头朝前。不订雷达。
 python view_field.py basic
 
 拓展：订阅雷达给的小车中心 x、y 和航向，再告诉裁判下一步。
 python view_field.py extend
+
+打开画面后按 1 到 5 换光线：很亮、白天、室内、偏暗、很暗。按 q 或 Esc 退出。
 """
 
 from __future__ import annotations
@@ -22,7 +24,8 @@ from car_pose import (
     load_setup,
     yaw_to_rad,
 )
-from report import LEVEL_LOCK, FieldWatch
+from field_map import TOWER_NO
+from report import LEVEL_LOCK, FieldWatch, light_from_key
 
 
 ROOT = Path(__file__).resolve().parent
@@ -129,24 +132,88 @@ def _listen(topic: str, yaw_unit: str):
     return node, samples
 
 
-def _show(lines: list[str], color) -> None:
+_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+_FONT_SIZE = 18
+_MARK = {
+    "0": (180, 180, 180),
+    "1": (255, 255, 0),
+    "2": (255, 0, 255),
+    "红": (0, 0, 255),
+    "蓝": (255, 80, 0),
+}
+_SHORT = {
+    "0": "空",
+    "1": "一层",
+    "2": "两层",
+    "红": "红顶",
+    "蓝": "蓝顶",
+}
+
+
+def _anchor(contour: np.ndarray) -> tuple[int, int]:
     import cv2
 
-    canvas = color if color is not None else np.zeros((720, 1280, 3), dtype=np.uint8)
-    board = canvas.copy()
-    for index, line in enumerate(lines):
-        cv2.putText(
-            board,
-            line,
-            (24, 40 + 36 * index),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
-    cv2.imshow("建塔点", board)
-    cv2.waitKey(1)
+    moment = cv2.moments(contour)
+    if moment["m00"] <= 0:
+        x, y, width, height = cv2.boundingRect(contour)
+        return x + width // 2, y + height // 2
+    return int(moment["m10"] / moment["m00"]), int(moment["m01"] / moment["m00"])
+
+
+def _wrap(draw, text: str, font, width: int) -> list[str]:
+    if draw.textlength(text, font=font) <= width:
+        return [text]
+    rows: list[str] = []
+    buf = ""
+    for char in text:
+        trial = buf + char
+        if buf and draw.textlength(trial, font=font) > width:
+            rows.append(buf)
+            buf = char
+        else:
+            buf = trial
+    if buf:
+        rows.append(buf)
+    return rows
+
+
+def paint_window(color, views, locked: dict, texts: list[str]):
+    # 格子轮廓标出在看哪一块。认到白盒后再沿白盒描一圈，并在旁边写短词。
+    import cv2
+    from PIL import Image, ImageDraw, ImageFont
+
+    board = color.copy() if color is not None else np.zeros((720, 1280, 3), dtype=np.uint8)
+    tags: list[tuple[int, int, str, tuple[int, int, int]]] = []
+    if views:
+        for name, view in views.items():
+            state = locked.get(name) or view.conclusion
+            bgr = _MARK.get(state, (0, 220, 255))
+            if view.region is not None:
+                cv2.drawContours(board, [view.region], -1, bgr, 2, cv2.LINE_AA)
+            if view.piece is not None:
+                cv2.drawContours(board, [view.piece], -1, bgr, 2, cv2.LINE_AA)
+            anchor = view.piece if view.piece is not None else view.region
+            if anchor is None:
+                continue
+            u, v = _anchor(anchor)
+            cv2.circle(board, (u, v), 6, bgr, -1, cv2.LINE_AA)
+            word = _SHORT.get(state)
+            if word:
+                tags.append((u + 10, max(0, v - 18), f"{TOWER_NO[name]} {word}", bgr))
+    font = ImageFont.truetype(_FONT, _FONT_SIZE)
+    panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(panel)
+    limit = max(board.shape[1] - 16, 40)
+    y = 6
+    for line in texts:
+        for row in _wrap(draw, line, font, limit):
+            draw.text((8, y), row, font=font, fill=(255, 255, 255), stroke_width=1, stroke_fill=(0, 0, 0))
+            y += _FONT_SIZE + 4
+    for u, v, text, bgr in tags:
+        rgb = (bgr[2], bgr[1], bgr[0])
+        draw.text((u, v), text, font=font, fill=rgb, stroke_width=1, stroke_fill=(0, 0, 0))
+    board[:] = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
+    return board
 
 
 def _apply_light(sensor, rs, level: str) -> None:
@@ -209,13 +276,21 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 light = watch.light
                 _apply_light(sensor, rs, light)
             lines = watch.lines(args.mode)
-            text = "\n".join(lines)
+            shown = watch.window_lines(args.mode)
+            text = "\n".join(shown)
             if text != previous:
                 print(text)
                 previous = text
-            _show(lines, color)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            locked = {name: vote.locked for name, vote in watch.votes.items()}
+            cv2.imshow("建塔点", paint_window(color, watch.views, locked, shown))
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
                 return lines
+            picked = light_from_key(key)
+            if picked is not None:
+                watch.choose_light(picked)
+                light = watch.light
+                _apply_light(sensor, rs, light)
     finally:
         pipeline.stop()
         cv2.destroyAllWindows()
@@ -236,7 +311,7 @@ def _once(args, watch: FieldWatch, pose: CarPose) -> list[str]:
 
 
 def run_basic(args) -> list[str]:
-    # 实地基础：右前角在原点，航向沿场地向前。俯仰用支架上人设的角度。
+    # 实地基础：右前角在场地原点右侧 1.2 m，前后对齐，车头朝前。俯仰用支架上人设的角度。
     loaded = load_setup(str(ROOT / "config" / "field.yaml"))
     pitch = loaded.pitch_deg if args.pitch is None else float(args.pitch)
     setup, pose = basic_origin_setup(pitch)

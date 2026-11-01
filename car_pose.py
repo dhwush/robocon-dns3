@@ -49,7 +49,7 @@ class Setup:
 
     @property
     def ready(self) -> bool:
-        # 基础把车摆在原点，不看雷达。拓展要确认对齐，并且安装尺寸已经量过。
+        # 基础用摆好的右前角，不看雷达。拓展要确认对齐，并且安装尺寸已经量过。
         if self.origin_basic:
             return self.center_to_corner is not None
         return bool(self.aligned) and self.center_to_corner is not None
@@ -87,9 +87,14 @@ def load_setup(path: str) -> Setup:
     )
 
 
+# 基础把右前角摆在场地原点右侧 1.2 m，前后仍与场地原点对齐。车头朝前。
+BASIC_CORNER_X = 1.2
+BASIC_CORNER_Y = 0.0
+
+
 def basic_origin_setup(pitch_deg: float) -> tuple[Setup, CarPose]:
-    # 人把右前角摆在原点，车头朝前。不订阅雷达，也不读取中心到右前角的测量。
-    # 航向为 0 时，这段安装差在投影里抵消，光心就是已知的安装位置。
+    # 不订阅雷达，也不读取中心到右前角的测量。
+    # 航向为 0 时，这段安装差在投影里抵消，位姿数字就是右前角在场地里的位置。
     # 这里的零向量只用来完成这次抵消，不是量到的尺寸，也不写入配置。
     setup = Setup(
         aligned=False,
@@ -99,7 +104,7 @@ def basic_origin_setup(pitch_deg: float) -> tuple[Setup, CarPose]:
         yaw_unit="rad",
         origin_basic=True,
     )
-    return setup, CarPose(0.0, 0.0, 0.0)
+    return setup, CarPose(BASIC_CORNER_X, BASIC_CORNER_Y, 0.0)
 
 
 def yaw_to_rad(yaw: float, unit: str) -> float:
