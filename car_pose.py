@@ -179,6 +179,18 @@ def project(point: np.ndarray, pose: CarPose, center_to_corner: np.ndarray, pitc
     return np.array([intr.fx * cam[0] / cam[2] + intr.cx, intr.fy * cam[1] / cam[2] + intr.cy], dtype=float)
 
 
+def pitch_from_gravity(gravity: np.ndarray | None) -> float | None:
+    # 彩色相机系里的重力方向。正数是抬头，单位度。相机 Z 向前，抬头时重力的前向分量是负的。
+    if gravity is None:
+        return None
+    down = np.asarray(gravity, dtype=float)
+    norm = float(np.linalg.norm(down))
+    if not np.isfinite(norm) or norm < 1e-6:
+        return None
+    down = down / norm
+    return float(-np.degrees(np.arcsin(np.clip(float(down[2]), -1.0, 1.0))))
+
+
 def shifted_pose(pose: CarPose, lateral_m: float) -> CarPose:
     # 正数是向车的右侧平移。航向不变，高度仍在地面上。
     yaw_c, yaw_s = float(np.cos(pose.yaw)), float(np.sin(pose.yaw))

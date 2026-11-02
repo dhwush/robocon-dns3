@@ -7,6 +7,7 @@ python view_field.py basic
 python view_field.py extend
 
 打开画面后按 1 到 5 换光线：很亮、白天、室内、偏暗、很暗。按 q 或 Esc 退出。
+画面最上面写加速度计读出的实时俯仰，正数是抬头。认塔仍用配置里的角度。
 """
 
 from __future__ import annotations
@@ -22,10 +23,11 @@ from car_pose import (
     closest_pose,
     load_intrinsics,
     load_setup,
+    pitch_from_gravity,
     yaw_to_rad,
 )
 from field_map import TOWER_NO
-from report import LEVEL_LOCK, FieldWatch, light_from_key
+from report import LEVEL_LOCK, FieldWatch, light_from_key, live_pitch_line
 
 
 ROOT = Path(__file__).resolve().parent
@@ -231,6 +233,93 @@ def _apply_light(sensor, rs, level: str) -> None:
         sensor.set_option(option, float(np.clip(value, span.min, span.max)))
 
 
+def _gravity_from_accel(specific: np.ndarray, rotation: np.ndarray) -> np.ndarray | None:
+    # 加速度计静止时指向“上”。旋到彩色相机系后取反，得到相机系里的重力方向。
+    up = rotation @ np.asarray(specific, dtype=float)
+    norm = float(np.linalg.norm(up))
+    if not np.isfinite(norm) or norm <= 1.0:
+        return None
+    return -up / norm
+
+
+def _accel_rotation(profile, rs) -> np.ndarray | None:
+    try:
+        motion = profile.get_stream(rs.stream.accel).as_motion_stream_profile()
+        color = profile.get_stream(rs.stream.color)
+        ext = motion.get_extrinsics_to(color)
+        return np.array(ext.rotation, dtype=float).reshape(3, 3)
+    except Exception:
+        return None
+
+
+def _open_camera(rs):
+    # 彩色和深度照旧。加速度计单独进来，用来读实时俯仰。没有加速度计就只开画面。
+    import threading
+
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+    config.enable_stream(rs.stream.accel)
+    align = rs.align(rs.stream.color)
+    lock = threading.Lock()
+    ready = threading.Event()
+    scale = {"v": 0.001}
+    accel = {"rotation": None, "gravity": None}
+    pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0}
+
+    def on_frame(frame) -> None:
+        try:
+            if frame.is_motion_frame():
+                rotation = accel["rotation"]
+                if rotation is None or frame.profile.stream_type() != rs.stream.accel:
+                    return
+                data = frame.as_motion_frame().get_motion_data()
+                specific = np.array([data.x, data.y, data.z], dtype=float)
+                gravity = _gravity_from_accel(specific, rotation)
+                if gravity is None:
+                    return
+                with lock:
+                    accel["gravity"] = gravity
+                return
+            if not frame.is_frameset():
+                return
+            aligned = align.process(frame.as_frameset())
+            color_frame = aligned.get_color_frame()
+            depth_frame = aligned.get_depth_frame()
+            if not color_frame or not depth_frame:
+                return
+            color = np.asanyarray(color_frame.get_data()).copy()
+            depth = np.asanyarray(depth_frame.get_data()).astype(np.float32) * scale["v"]
+            stamp = float(color_frame.get_timestamp()) * 1e-3
+            with lock:
+                gravity = None if accel["gravity"] is None else accel["gravity"].copy()
+                pending["color"] = color
+                pending["depth"] = depth
+                pending["gravity"] = gravity
+                pending["stamp"] = stamp
+            ready.set()
+        except Exception:
+            return
+
+    try:
+        profile = pipeline.start(config, on_frame)
+    except Exception as exc:
+        if "No device connected" in str(exc):
+            raise
+        try:
+            pipeline.stop()
+        except Exception:
+            pass
+        pipeline = rs.pipeline()
+        config.disable_stream(rs.stream.accel)
+        profile = pipeline.start(config, on_frame)
+    scale["v"] = float(profile.get_device().first_depth_sensor().get_depth_scale())
+    accel["rotation"] = _accel_rotation(profile, rs)
+    sensor = profile.get_device().first_color_sensor()
+    return pipeline, sensor, ready, lock, pending
+
+
 def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     import cv2
 
@@ -241,28 +330,27 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         print("\n".join(lines))
         print("没有接上相机")
         return lines
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-    config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-    profile = pipeline.start(config)
-    scale = float(profile.get_device().first_depth_sensor().get_depth_scale())
-    align = rs.align(rs.stream.color)
-    sensor = profile.get_device().first_color_sensor()
+    pipeline, sensor, ready, lock, pending = _open_camera(rs)
     listener = _listen(watch.setup.topic, watch.setup.yaw_unit) if watch.setup.topic else None
     previous = ""
     light = watch.light
     try:
         _apply_light(sensor, rs, light)
         while True:
-            frames = align.process(pipeline.wait_for_frames())
-            color_frame = frames.get_color_frame()
-            depth_frame = frames.get_depth_frame()
-            if not color_frame or not depth_frame:
+            if not ready.wait(0.05):
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord("q"), 27):
+                    return watch.lines(args.mode)
                 continue
-            color = np.asanyarray(color_frame.get_data()).copy()
-            depth = np.asanyarray(depth_frame.get_data()).astype(np.float32) * scale
-            stamp = float(color_frame.get_timestamp()) * 1e-3
+            ready.clear()
+            with lock:
+                color = pending["color"]
+                depth = pending["depth"]
+                gravity = None if pending["gravity"] is None else pending["gravity"].copy()
+                stamp = float(pending["stamp"])
+            if color is None or depth is None:
+                continue
+            measured = pitch_from_gravity(gravity)
             current = pose
             if listener is not None:
                 import rclpy
@@ -282,7 +370,8 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 print(text)
                 previous = text
             locked = {name: vote.locked for name, vote in watch.votes.items()}
-            cv2.imshow("建塔点", paint_window(color, watch.views, locked, shown))
+            painted = [live_pitch_line(measured)] + shown
+            cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines

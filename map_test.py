@@ -4,6 +4,7 @@ python map_test.py
 
 点下去的是相机光心在地面上的位置。航向在这个窗口里输入，单位是度，正数向左转。
 回车打开相机，退格改数字。俯仰用 config/field.yaml 里的角度，光心高度仍是 0.70 m。
+摄像头窗口最上面另显示加速度计读出的实时俯仰。
 关掉相机窗口后回到平面图，可以再点下一个位置。q 或 Esc 退出。
 """
 
@@ -25,6 +26,8 @@ X_MAX = 3.6
 Y_MIN = -0.8
 Y_MAX = 6.4
 SCALE = 100
+# 离边不到 1 cm 才吸。图上大约一个像素，避免光标离得远也跟着跳。
+SNAP_M = 0.01
 _FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 _COLORS = {
     0.20: (20, 70, 20),
@@ -51,6 +54,39 @@ def _pixel(x: float, y: float) -> tuple[int, int]:
 
 def _world(u: int, v: int) -> tuple[float, float]:
     return X_MIN + u / SCALE, Y_MAX - v / SCALE
+
+
+def _edge_lines() -> tuple[tuple[float, ...], tuple[float, ...]]:
+    # 1.2 m 的台，以及台上和地面上那块 50 cm 方块。吸的是边所在的整条直线。
+    xs: list[float] = []
+    ys: list[float] = []
+    seen: set[tuple[float, float, float, float]] = set()
+    boxes = [cell.bounds(0.0) for cell in all_cells()]
+    boxes.extend(cell.search_bounds(0.0) for cell in tower_cells())
+    for box in boxes:
+        if box in seen:
+            continue
+        seen.add(box)
+        x0, x1, y0, y1 = box
+        xs.extend((x0, x1))
+        ys.extend((y0, y1))
+    return tuple(xs), tuple(ys)
+
+
+def _snap_axis(value: float, lines: tuple[float, ...]) -> float:
+    snapped = value
+    gap = SNAP_M
+    for line in lines:
+        distance = abs(value - line)
+        if distance <= gap:
+            gap = distance
+            snapped = line
+    return snapped
+
+
+def _snap_cursor(x: float, y: float) -> tuple[float, float]:
+    xs, ys = _edge_lines()
+    return _snap_axis(x, xs), _snap_axis(y, ys)
 
 
 def _canvas() -> np.ndarray:
@@ -153,7 +189,7 @@ def _draw_map(
             draw.line((u, v, *_pixel(*ahead)), fill=(255, 220, 0), width=2)
         draw.text((u + 8, v + 4), "光心", font=font, fill=(255, 220, 0))
     if marker is None:
-        hint = f"点一下光心。然后在窗口里输入航向，正数向左转。俯仰 {pitch:.0f} 度。q 退出"
+        hint = f"点一下光心，靠近方块边会吸住。然后在窗口里输入航向，正数向左转。俯仰 {pitch:.0f} 度。q 退出"
     else:
         hint = f"航向 {yaw_text} 度，正数向左转。回车打开相机，退格修改。俯仰 {pitch:.0f} 度。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
@@ -191,10 +227,11 @@ def main() -> None:
     yaw_text = ""
 
     def on_mouse(event, u, v, _flags, _param) -> None:
+        xy = _snap_cursor(*_world(u, v))
         if event == cv2.EVENT_MOUSEMOVE:
-            hover["xy"] = _world(u, v)
+            hover["xy"] = xy
         elif event == cv2.EVENT_LBUTTONDOWN:
-            picked["xy"] = _world(u, v)
+            picked["xy"] = xy
 
     # 窗口名必须是英文。这版 OpenCV 用 Qt 时按 Latin-1 找窗口，中文名绑不上鼠标。
     window = "field"

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from car_pose import CarPose, Setup, camera_position, closest_pose, load_intrinsics, pose_moved
-from map_test import _append_yaw, _yaw_from_text, _yaw_key, pose_for_optical
+from map_test import _append_yaw, _snap_cursor, _yaw_from_text, _yaw_key, pose_for_optical
 from classify import heights_match, inspect_frame
 from field_map import MARGIN_M, all_cells, search_contains, tower_cells
 from report import FieldWatch, step_light
@@ -416,6 +416,26 @@ def test_yaw_is_typed_in_the_map_window():
     assert _yaw_key(27) == "esc"
 
 
+def test_cursor_snaps_onto_a_nearby_block_edge():
+    from field_map import ORIGIN_X, ORIGIN_Y
+
+    # 最近一行左缘。点在方块外面，仍吸到这条边的延长线上。
+    x, y = _snap_cursor(ORIGIN_X + 0.008, -0.2)
+    assert x == ORIGIN_X
+    assert y == -0.2
+    # 拐角两轴一起吸。
+    x, y = _snap_cursor(ORIGIN_X - 0.006, ORIGIN_Y + 0.006)
+    assert x == ORIGIN_X and y == ORIGIN_Y
+    # 台心 50 cm 的边也吸。最近一行左侧格心 x = -1.215，右缘是 -0.965。
+    x, y = _snap_cursor(-0.965 + 0.004, 1.30)
+    assert abs(x - (-0.965)) < 1e-9
+    assert y == 1.30
+    # 离开 1 cm 就不吸。
+    x, y = _snap_cursor(ORIGIN_X + 0.02, ORIGIN_Y + 0.02)
+    assert abs(x - (ORIGIN_X + 0.02)) < 1e-9
+    assert abs(y - (ORIGIN_Y + 0.02)) < 1e-9
+
+
 def test_map_click_lands_on_the_optical_center():
     yaw = np.deg2rad(30.0)
     pose = pose_for_optical(1.2, 0.4, yaw)
@@ -423,6 +443,22 @@ def test_map_click_lands_on_the_optical_center():
     assert np.allclose(optical, [1.2, 0.4, 0.70])
     straight = pose_for_optical(0.5, 1.0, 0.0)
     assert np.allclose([straight.x, straight.y], [0.5 + 0.211, 1.0 - 0.05])
+
+
+def test_live_pitch_reads_look_up_as_positive():
+    from car_pose import pitch_from_gravity
+    from report import live_pitch_line
+
+    assert pitch_from_gravity(None) is None
+    assert abs(pitch_from_gravity(np.array([0.0, 1.0, 0.0]))) < 1e-6
+    look_up = np.array([0.0, np.cos(np.deg2rad(30.0)), -np.sin(np.deg2rad(30.0))])
+    look_down = np.array([0.0, np.cos(np.deg2rad(30.0)), np.sin(np.deg2rad(30.0))])
+    assert abs(pitch_from_gravity(look_up) - 30.0) < 1e-6
+    assert abs(pitch_from_gravity(look_down) + 30.0) < 1e-6
+    assert live_pitch_line(None) == "俯仰读不出来"
+    assert live_pitch_line(12.34) == "俯仰 抬头 12.3 度"
+    assert live_pitch_line(-3.0) == "俯仰 低头 3.0 度"
+    assert live_pitch_line(0.0) == "俯仰 0.0 度"
 
 
 def test_closest_pose_uses_the_nearest_stamp():

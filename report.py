@@ -41,6 +41,18 @@ def light_hint(level: str) -> str:
     return f"光线 {current}，曝光 {exposure:.0f}。按 {choices}。q 退出"
 
 
+def live_pitch_line(degrees: float | None) -> str:
+    # 画面上的实时俯仰。正数是抬头，和投影用的角度同一个方向。
+    if degrees is None:
+        return "俯仰读不出来"
+    shown = round(float(degrees), 1)
+    if shown > 0.0:
+        return f"俯仰 抬头 {shown:.1f} 度"
+    if shown < 0.0:
+        return f"俯仰 低头 {abs(shown):.1f} 度"
+    return "俯仰 0.0 度"
+
+
 def light_from_key(key: int) -> str | None:
     index = int(key) - ord("1")
     if 0 <= index < len(LEVELS):
