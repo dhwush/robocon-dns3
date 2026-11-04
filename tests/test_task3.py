@@ -15,8 +15,13 @@ from map_test import (
     _snap_cursor,
     _yaw_from_text,
     _yaw_key,
+    UsedPoint,
+    load_points,
     nearest_green_block,
+    point_at,
     pose_for_optical,
+    remember_point,
+    save_points,
 )
 from classify import heights_match, inspect_frame
 from field_map import MARGIN_M, all_cells, search_contains, tower_cells
@@ -820,6 +825,43 @@ def test_yaw_is_typed_in_the_map_window():
     assert _yaw_key(0x01000004) == "ok"
     assert _yaw_key(0x01000003) == "back"
     assert _yaw_key(27) == "esc"
+
+
+def test_used_points_can_be_chosen_again():
+    from map_test import _hit_used, _pixel
+
+    first = remember_point([], 1.2, 0.4, "30")
+    second = remember_point(first, -0.5, 1.0, "-15")
+    assert second[0] == UsedPoint(-0.5, 1.0, "-15")
+    assert second[1] == UsedPoint(1.2, 0.4, "30")
+    # 同一处、同一航向再记一次，只留最新的那条。
+    again = remember_point(second, 1.2004, 0.4004, "30.0")
+    assert again[0].yaw_text == "30.0"
+    assert len(again) == 2
+    # 航向不同就另外留着。
+    turned = remember_point(again, 1.2, 0.4, "40")
+    assert len(turned) == 3
+    crowded = []
+    for index in range(12):
+        crowded = remember_point(crowded, float(index), 0.0, "0")
+    assert len(crowded) == 9
+    assert crowded[0].x == 11.0
+    assert point_at(second, "1") == second[0]
+    assert point_at(second, "2") == second[1]
+    assert point_at(second, "3") is None
+    assert point_at(second, "0") is None
+    u, v = _pixel(1.2, 0.4)
+    assert _hit_used(second, u, v) == second[1]
+    assert _hit_used(second, u + 30, v) is None
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "map_points.txt"
+        save_points(path, second)
+        assert load_points(path) == second
+        path.write_text("坏行\n1.2 0.4\n0 1 -\n0.2 0.3 10\n", encoding="utf-8")
+        assert load_points(path) == [UsedPoint(0.2, 0.3, "10")]
 
 
 def test_cursor_snaps_onto_a_nearby_block_edge():

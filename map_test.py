@@ -5,11 +5,13 @@ python map_test.py
 点下去的是相机光心在地面上的位置。航向在这个窗口里输入，单位是度，正数向左转。
 回车打开相机，退格改数字。刚打开时俯仰用 config/field.yaml 里的角度，读到加速度计之后每帧改用实时俯仰。光心高度仍是 0.70 m。
 摄像头窗口最上面另显示这个实时俯仰。
-关掉相机窗口后回到平面图，可以再点下一个位置。q 或 Esc 退出。
+关掉相机窗口后回到平面图，可以再点下一个位置。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -26,6 +28,8 @@ SCALE = 100
 # 离边不到 1 cm 才吸。图上大约一个像素，避免光标离得远也跟着跳。
 SNAP_M = 0.01
 _FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+_POINTS_PATH = ROOT / "config" / "map_points.txt"
+_POINT_LIMIT = 9
 _COLORS = {
     0.20: (20, 70, 20),
     0.40: (40, 140, 50),
@@ -153,6 +157,96 @@ def _append_yaw(text: str, char: str) -> str:
     return text
 
 
+@dataclass(frozen=True)
+class UsedPoint:
+    x: float
+    y: float
+    yaw_text: str
+
+
+def _same_used(one: UsedPoint, other: UsedPoint) -> bool:
+    # 同一处、同一航向只留一条。差 1 mm 或航向对不上，就当成另一个点。
+    left = _yaw_from_text(one.yaw_text)
+    right = _yaw_from_text(other.yaw_text)
+    if left is None or right is None:
+        return False
+    return abs(one.x - other.x) < 1e-3 and abs(one.y - other.y) < 1e-3 and abs(left - right) < 1e-6
+
+
+def remember_point(points: list[UsedPoint], x: float, y: float, yaw_text: str) -> list[UsedPoint]:
+    # 最新的排在最前，按 1 就是刚用过的。最多留 9 个，对应数字键。
+    fresh = UsedPoint(float(x), float(y), yaw_text)
+    kept = [point for point in points if not _same_used(point, fresh)]
+    return [fresh, *kept][:_POINT_LIMIT]
+
+
+def load_points(path: Path) -> list[UsedPoint]:
+    if not path.is_file():
+        return []
+    points: list[UsedPoint] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            x, y = float(parts[0]), float(parts[1])
+        except ValueError:
+            continue
+        if _yaw_from_text(parts[2]) is None:
+            continue
+        points.append(UsedPoint(x, y, parts[2]))
+    return _trim_loaded(points)
+
+
+def _trim_loaded(points: list[UsedPoint]) -> list[UsedPoint]:
+    kept: list[UsedPoint] = []
+    for point in points:
+        if any(_same_used(point, older) for older in kept):
+            continue
+        kept.append(point)
+        if len(kept) >= _POINT_LIMIT:
+            break
+    return kept
+
+
+def save_points(path: Path, points: list[UsedPoint]) -> None:
+    lines = [f"{point.x:.3f} {point.y:.3f} {point.yaw_text}" for point in points]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def point_at(points: list[UsedPoint], action: str) -> UsedPoint | None:
+    if len(action) != 1 or not action.isdigit() or action == "0":
+        return None
+    index = int(action) - 1
+    if index >= len(points):
+        return None
+    return points[index]
+
+
+def _hit_used(points: list[UsedPoint], u: int, v: int, radius: float = 8.0) -> UsedPoint | None:
+    chosen = None
+    gap = radius
+    for point in points:
+        px, py = _pixel(point.x, point.y)
+        distance = float(np.hypot(px - u, py - v))
+        if distance <= gap:
+            chosen = point
+            gap = distance
+    return chosen
+
+
+def _history_lines(points: list[UsedPoint]) -> list[str]:
+    if not points:
+        return []
+    lines = ["之前的点，按数字或点一下直接选用："]
+    for index, point in enumerate(points, start=1):
+        lines.append(
+            f"{index}  x {point.x:+.3f} m  y {point.y:+.3f} m  航向 {point.yaw_text}"
+        )
+    return lines
+
+
 def _yaw_key(key: int) -> str:
     # Qt 把回车和退格编成大于 255 的键值。窗口还在刷新时才能收到这些键。
     if key < 0:
@@ -179,6 +273,7 @@ def _draw_map(
     pitch: float,
     hover: tuple[float, float] | None = None,
     yaw_text: str = "",
+    used: list[UsedPoint] | None = None,
 ) -> np.ndarray:
     import cv2
     from PIL import Image, ImageDraw, ImageFont
@@ -214,6 +309,10 @@ def _draw_map(
         draw.rectangle((u0, v0, u1, v1), fill=(176, 122, 62), outline=(90, 58, 24))
         u, v = _pixel(cell.x, cell.y)
         draw.text((u - 6, v - 10), TOWER_NO[cell.name], font=font, fill=(255, 255, 255))
+    for index, point in enumerate(used or [], start=1):
+        u, v = _pixel(point.x, point.y)
+        draw.ellipse((u - 5, v - 5, u + 5, v + 5), outline=(80, 180, 255), width=2)
+        draw.text((u + 8, v - 18), str(index), font=font, fill=(80, 180, 255))
     ox, oy = _pixel(0.0, 0.0)
     draw.ellipse((ox - 4, oy - 4, ox + 4, oy + 4), fill=(255, 80, 80))
     draw.text((ox + 8, oy - 8), "原点", font=font, fill=(255, 180, 180))
@@ -227,9 +326,17 @@ def _draw_map(
         draw.text((u + 8, v + 4), "光心", font=font, fill=(255, 220, 0))
     if marker is None:
         hint = f"点一下光心，靠近方块边会吸住。然后在窗口里输入航向，正数向左转。俯仰 {pitch:.0f} 度。q 退出"
+        if used:
+            hint = f"点新的光心，或按 1 到 {len(used)} 选用之前的点。俯仰 {pitch:.0f} 度。q 退出"
     else:
         hint = f"航向 {yaw_text} 度，正数向左转。回车打开相机，退格修改。俯仰 {pitch:.0f} 度。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
+    history = _history_lines(used or [])
+    line_h = 20
+    y = board.shape[0] - 8 - line_h * len(history)
+    for row in history:
+        draw.text((8, y), row, font=font, fill=(180, 220, 255))
+        y += line_h
     if hover is not None:
         hx, hy = hover
         label = _cursor_text(hx, hy)
@@ -261,7 +368,9 @@ def main() -> None:
 
     pitch = load_setup(str(ROOT / "config" / "field.yaml")).pitch_deg
     picked: dict[str, tuple[float, float] | None] = {"xy": None}
+    chosen: dict[str, UsedPoint | None] = {"point": None}
     hover: dict[str, tuple[float, float] | None] = {"xy": None}
+    used = load_points(_POINTS_PATH)
     marker: tuple[float, float] | None = None
     yaw_text = ""
 
@@ -270,7 +379,11 @@ def main() -> None:
         if event == cv2.EVENT_MOUSEMOVE:
             hover["xy"] = xy
         elif event == cv2.EVENT_LBUTTONDOWN:
-            picked["xy"] = xy
+            hit = _hit_used(used, u, v)
+            if hit is not None:
+                chosen["point"] = hit
+            else:
+                picked["xy"] = xy
 
     # 窗口名必须是英文。这版 OpenCV 用 Qt 时按 Latin-1 找窗口，中文名绑不上鼠标。
     window = "field"
@@ -278,19 +391,30 @@ def main() -> None:
     cv2.setMouseCallback(window, on_mouse)
 
     while True:
-        if picked["xy"] is not None:
+        if chosen["point"] is not None:
+            hit = chosen["point"]
+            chosen["point"] = None
+            marker = (hit.x, hit.y)
+            yaw_text = hit.yaw_text
+        elif picked["xy"] is not None:
             marker = picked["xy"]
             picked["xy"] = None
         yaw = _yaw_from_text(yaw_text) if marker is not None else None
-        cv2.imshow(window, _draw_map(marker, yaw, pitch, hover["xy"], yaw_text))
+        cv2.imshow(window, _draw_map(marker, yaw, pitch, hover["xy"], yaw_text, used))
         action = _yaw_key(cv2.waitKeyEx(30))
         if marker is None:
             if action in ("quit", "esc"):
                 break
+            earlier = point_at(used, action)
+            if earlier is not None:
+                marker = (earlier.x, earlier.y)
+                yaw_text = earlier.yaw_text
             continue
         if action == "ok":
             if yaw is None:
                 continue
+            used = remember_point(used, marker[0], marker[1], yaw_text)
+            save_points(_POINTS_PATH, used)
             cv2.destroyWindow(window)
             _open_camera(marker[0], marker[1], yaw, pitch)
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
