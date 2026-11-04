@@ -127,8 +127,8 @@ def pose_moved(previous: CarPose | None, current: CarPose) -> bool:
     return bool(step > JITTER_M or turn > JITTER_YAW)
 
 
-def _axes(yaw: float, pitch_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # 航向为正是向左转。俯仰为正是抬头。相机 Y 轴朝下。
+def _axes(yaw: float, pitch_deg: float, roll_deg: float = 0.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # 航向为正是向左转。俯仰为正是抬头。横滚为正是右侧向下。相机 Y 轴朝下。
     yaw_c, yaw_s = float(np.cos(yaw)), float(np.sin(yaw))
     right = np.array([yaw_c, yaw_s, 0.0], dtype=float)
     forward = np.array([-yaw_s, yaw_c, 0.0], dtype=float)
@@ -136,7 +136,13 @@ def _axes(yaw: float, pitch_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndar
     pitch = float(np.deg2rad(pitch_deg))
     ahead = np.cos(pitch) * forward + np.sin(pitch) * up
     down = np.sin(pitch) * forward - np.cos(pitch) * up
-    return right, down, ahead
+    roll = float(np.deg2rad(roll_deg))
+    if abs(roll) < 1e-12:
+        return right, down, ahead
+    roll_c, roll_s = float(np.cos(roll)), float(np.sin(roll))
+    rolled_right = roll_c * right + roll_s * down
+    rolled_down = -roll_s * right + roll_c * down
+    return rolled_right, rolled_down, ahead
 
 
 def camera_position(pose: CarPose, center_to_corner: np.ndarray, pitch_deg: float) -> np.ndarray:
@@ -165,30 +171,63 @@ def camera_position(pose: CarPose, center_to_corner: np.ndarray, pitch_deg: floa
     return center + rotated
 
 
-def to_camera(point: np.ndarray, pose: CarPose, center_to_corner: np.ndarray, pitch_deg: float) -> np.ndarray:
-    origin = camera_position(pose, center_to_corner, pitch_deg)
-    right, down, ahead = _axes(pose.yaw, pitch_deg)
+def camera_frame(
+    pose: CarPose, center_to_corner: np.ndarray, pitch_deg: float, roll_deg: float = 0.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    # 光心，以及相机系的右、下、前。深度点乘这三轴加回光心，就是场地上的点。
+    return camera_position(pose, center_to_corner, pitch_deg), *_axes(pose.yaw, pitch_deg, roll_deg)
+
+
+def to_camera(
+    point: np.ndarray,
+    pose: CarPose,
+    center_to_corner: np.ndarray,
+    pitch_deg: float,
+    roll_deg: float = 0.0,
+) -> np.ndarray:
+    origin, right, down, ahead = camera_frame(pose, center_to_corner, pitch_deg, roll_deg)
     delta = np.asarray(point, dtype=float) - origin
     return np.array([float(np.dot(delta, right)), float(np.dot(delta, down)), float(np.dot(delta, ahead))])
 
 
-def project(point: np.ndarray, pose: CarPose, center_to_corner: np.ndarray, pitch_deg: float, intr: Intrinsics) -> np.ndarray | None:
-    cam = to_camera(point, pose, center_to_corner, pitch_deg)
+def project(
+    point: np.ndarray,
+    pose: CarPose,
+    center_to_corner: np.ndarray,
+    pitch_deg: float,
+    intr: Intrinsics,
+    roll_deg: float = 0.0,
+) -> np.ndarray | None:
+    cam = to_camera(point, pose, center_to_corner, pitch_deg, roll_deg)
     if cam[2] <= 0.2:
         return None
     return np.array([intr.fx * cam[0] / cam[2] + intr.cx, intr.fy * cam[1] / cam[2] + intr.cy], dtype=float)
 
 
-def pitch_from_gravity(gravity: np.ndarray | None) -> float | None:
-    # 彩色相机系里的重力方向。正数是抬头，单位度。相机 Z 向前，抬头时重力的前向分量是负的。
+def _gravity_down(gravity: np.ndarray | None) -> np.ndarray | None:
     if gravity is None:
         return None
     down = np.asarray(gravity, dtype=float)
     norm = float(np.linalg.norm(down))
     if not np.isfinite(norm) or norm < 1e-6:
         return None
-    down = down / norm
+    return down / norm
+
+
+def pitch_from_gravity(gravity: np.ndarray | None) -> float | None:
+    # 彩色相机系里的重力方向。正数是抬头，单位度。相机 Z 向前，抬头时重力的前向分量是负的。
+    down = _gravity_down(gravity)
+    if down is None:
+        return None
     return float(-np.degrees(np.arcsin(np.clip(float(down[2]), -1.0, 1.0))))
+
+
+def roll_from_gravity(gravity: np.ndarray | None) -> float | None:
+    # 和俯仰同一条重力。正数是右侧向下，单位度。
+    down = _gravity_down(gravity)
+    if down is None:
+        return None
+    return float(np.degrees(np.arctan2(float(down[0]), float(down[1]))))
 
 
 def shifted_pose(pose: CarPose, lateral_m: float) -> CarPose:

@@ -1,4 +1,4 @@
-"""拓展指令的下一步。先转向，再俯仰，被挡住才平移。"""
+"""拓展指令的下一步。当前朝向里能看清的先记下，再改俯仰，然后转向，被挡住才平移。"""
 
 from __future__ import annotations
 
@@ -96,10 +96,7 @@ def next_action(
         ]
         if readable:
             return None
-    yaw_names = [name for name in pending if views[name].needs_yaw]
-    if yaw_names:
-        target = min(yaw_names, key=lambda name: abs(views[name].bearing_deg))
-        return format_yaw(views[target].bearing_deg)
+    # 左右已经在画面里、只差高度的，先改俯仰，再为左右出画的格子转向。
     pitch_names = [
         name
         for name in pending
@@ -108,6 +105,10 @@ def next_action(
     if pitch_names:
         target = pitch_names[0]
         return format_pitch(views[target].pitch_target_deg)
+    yaw_names = [name for name in pending if views[name].needs_yaw]
+    if yaw_names:
+        target = min(yaw_names, key=lambda name: abs(views[name].bearing_deg))
+        return format_yaw(views[target].bearing_deg)
     blocked = [name for name in pending if views[name].blocked and views[name].conclusion is None]
     if not blocked:
         return None

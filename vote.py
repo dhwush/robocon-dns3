@@ -1,4 +1,4 @@
-"""连续 5 帧同一结论才锁定。单独一帧相反不改。"""
+"""连续 5 帧同一结论才锁定。锁定后，还没看清的帧跳过。另有 5 帧别的结论才改锁。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,10 @@ class Vote:
 
     def see(self, conclusion: str | None) -> None:
         if self.locked is not None:
-            if conclusion is None or conclusion == self.locked:
+            # 没看清既不是赞成，也不抹掉已经攒下的反对。和锁上相同的一帧才清零。
+            if conclusion is None:
+                return
+            if conclusion == self.locked:
                 self.disagree = 0
                 return
             self.disagree += 1

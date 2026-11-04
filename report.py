@@ -63,21 +63,27 @@ def light_from_key(key: int) -> str | None:
 def plain_state(view, locked: str | None, mode: str) -> str:
     if mode == "basic":
         if locked and view.in_view:
-            return STATE_WORDS[locked]
-        if view.blocked and not locked:
-            return "被挡住了，这一眼不写结论"
-        return "还没写下"
-    if locked:
-        return STATE_WORDS[locked]
-    if not view.in_view and view.needs_yaw:
-        return "不在画面里，要先转向"
-    if view.needs_pitch:
-        return "高度不在画面里，要改俯仰"
-    if view.blocked and view.conclusion is None:
-        return "被前面的台挡住了，还不能确定"
-    if view.conclusion is None:
-        return "还没看清"
-    return f"这一眼像是{STATE_WORDS[view.conclusion]}，还要再看几帧"
+            text = STATE_WORDS[locked]
+        elif view.blocked and not locked:
+            text = "被挡住了，这一眼不写结论"
+        else:
+            text = "还没写下"
+    elif locked:
+        text = STATE_WORDS[locked]
+    elif not view.in_view and view.needs_yaw:
+        text = "不在画面里，要先转向"
+    elif view.needs_pitch:
+        text = "高度不在画面里，要改俯仰"
+    elif view.blocked and view.conclusion is None:
+        text = "被前面的台挡住了，还不能确定"
+    elif view.conclusion is None:
+        text = "还没看清"
+    else:
+        text = f"这一眼像是{STATE_WORDS[view.conclusion]}，还要再看几帧"
+    shown = locked or view.conclusion
+    if view.method == "深度" and view.conclusion is not None and shown == view.conclusion:
+        return text + "，深度"
+    return text
 
 
 def step_light(level: str, white_frac: float, mean_v: float, wait: int) -> tuple[str, int]:
@@ -97,6 +103,7 @@ class FieldWatch:
         self.setup = setup
         self.intr = intr
         self.pitch = float(setup.pitch_deg)
+        self.roll = 0.0
         self.votes = {name: Vote() for name in DISPLAY}
         self.last_pose: CarPose | None = None
         self.light = "daylight"
@@ -129,6 +136,7 @@ class FieldWatch:
             self.intr,
             color,
             depth,
+            self.roll,
         )
         frac = max((view.white_frac for view in self.views.values()), default=0.0)
         mean_v = min((view.mean_v for view in self.views.values()), default=255.0)

@@ -3,8 +3,8 @@
 python map_test.py
 
 点下去的是相机光心在地面上的位置。航向在这个窗口里输入，单位是度，正数向左转。
-回车打开相机，退格改数字。俯仰用 config/field.yaml 里的角度，光心高度仍是 0.70 m。
-摄像头窗口最上面另显示加速度计读出的实时俯仰。
+回车打开相机，退格改数字。刚打开时俯仰用 config/field.yaml 里的角度，读到加速度计之后每帧改用实时俯仰。光心高度仍是 0.70 m。
+摄像头窗口最上面另显示这个实时俯仰。
 关掉相机窗口后回到平面图，可以再点下一个位置。q 或 Esc 退出。
 """
 
@@ -20,11 +20,8 @@ from report import FieldWatch
 from view_field import ROOT, _live
 
 
-# 平面图范围盖住场地和左侧那块木头方，也盖住场地近边前面那一段。
-X_MIN = -3.8
-X_MAX = 3.6
-Y_MIN = -0.8
-Y_MAX = 6.4
+# 黑色地面比最外一圈方块再多出 3 m。相机深度大约到 3 m，观测点可以点到这个范围。
+_OPEN_M = 3.0
 SCALE = 100
 # 离边不到 1 cm 才吸。图上大约一个像素，避免光标离得远也跟着跳。
 SNAP_M = 0.01
@@ -46,6 +43,19 @@ def pose_for_optical(x: float, y: float, yaw: float) -> CarPose:
     )
     origin = np.array([x, y], dtype=float) - rotated
     return CarPose(float(origin[0]), float(origin[1]), float(yaw))
+
+
+def _outer_limits() -> tuple[float, float, float, float]:
+    xs: list[float] = []
+    ys: list[float] = []
+    for cell in list(all_cells()) + list(tower_cells()):
+        x0, x1, y0, y1 = cell.bounds(0.0)
+        xs.extend((x0, x1))
+        ys.extend((y0, y1))
+    return min(xs) - _OPEN_M, max(xs) + _OPEN_M, min(ys) - _OPEN_M, max(ys) + _OPEN_M
+
+
+X_MIN, X_MAX, Y_MIN, Y_MAX = _outer_limits()
 
 
 def _pixel(x: float, y: float) -> tuple[int, int]:
@@ -96,8 +106,35 @@ def _canvas() -> np.ndarray:
     return board
 
 
+def _block_name(cell) -> str:
+    height_cm = int(round(cell.height * 100))
+    return f"{height_cm} cm 绿色方块地面"
+
+
+def nearest_green_block(x: float, y: float):
+    # 距离量到绿色方块地面上最近的一点。人站在这块 1.2 m 的台上就是 0。
+    # 十二块绿台都算，不用台上那块 50 cm 建塔区，也不算木头上的 1、5、6。
+    chosen = None
+    gap = None
+    point = (x, y)
+    for cell in all_cells():
+        x0, x1, y0, y1 = cell.bounds(0.0)
+        near_x = min(max(x, x0), x1)
+        near_y = min(max(y, y0), y1)
+        distance = float(np.hypot(x - near_x, y - near_y))
+        if gap is None or distance < gap:
+            chosen = cell
+            gap = distance
+            point = (near_x, near_y)
+    return chosen, float(gap), point
+
+
 def _cursor_text(x: float, y: float) -> str:
-    return f"相对原点  x {x:+.3f} m    y {y:+.3f} m"
+    cell, distance, _point = nearest_green_block(x, y)
+    return (
+        f"相对原点  x {x:+.3f} m    y {y:+.3f} m"
+        f"    距最近的{_block_name(cell)} {distance:.3f} m"
+    )
 
 
 def _yaw_from_text(text: str) -> float | None:
@@ -197,9 +234,11 @@ def _draw_map(
         hx, hy = hover
         label = _cursor_text(hx, hy)
         draw.text((8, 30), label, font=font, fill=(255, 220, 80))
+        _cell, _distance, near = nearest_green_block(hx, hy)
         u, v = _pixel(hx, hy)
+        draw.line((u, v, *_pixel(*near)), fill=(255, 220, 80), width=1)
         draw.ellipse((u - 3, v - 3, u + 3, v + 3), outline=(255, 220, 80))
-        text_x = u + 10 if u < board.shape[1] - 340 else max(8, u - 330)
+        text_x = u + 10 if u < board.shape[1] - 520 else max(8, u - 510)
         text_y = v - 22 if v > 56 else v + 8
         draw.text((text_x, text_y), label, font=font, fill=(255, 220, 80))
     board[:] = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)

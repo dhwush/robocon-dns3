@@ -7,7 +7,7 @@ python view_field.py basic
 python view_field.py extend
 
 打开画面后按 1 到 5 换光线：很亮、白天、室内、偏暗、很暗。按 q 或 Esc 退出。
-画面最上面写加速度计读出的实时俯仰，正数是抬头。认塔仍用配置里的角度。
+画面最上面写加速度计读出的实时俯仰，正数是抬头。读得到时，这一帧的认塔和画框都用这个角度。
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from car_pose import (
     load_intrinsics,
     load_setup,
     pitch_from_gravity,
+    roll_from_gravity,
     yaw_to_rad,
 )
 from field_map import TOWER_NO
@@ -152,6 +153,16 @@ _SHORT = {
 }
 
 
+def mark_text(number: str, state: str | None, method: str | None) -> str | None:
+    # 画面上的短词。方法只标在这一眼实际用的那条后面，裁判短句不带这个字。
+    word = _SHORT.get(state or "")
+    if not word:
+        return None
+    if method:
+        return f"{number} {word}·{method}"
+    return f"{number} {word}"
+
+
 def _anchor(contour: np.ndarray) -> tuple[int, int]:
     import cv2
 
@@ -199,9 +210,10 @@ def paint_window(color, views, locked: dict, texts: list[str]):
                 continue
             u, v = _anchor(anchor)
             cv2.circle(board, (u, v), 6, bgr, -1, cv2.LINE_AA)
-            word = _SHORT.get(state)
+            method = view.method if view.conclusion == state else None
+            word = mark_text(TOWER_NO[name], state, method)
             if word:
-                tags.append((u + 10, max(0, v - 18), f"{TOWER_NO[name]} {word}", bgr))
+                tags.append((u + 10, max(0, v - 18), word, bgr))
     font = ImageFont.truetype(_FONT, _FONT_SIZE)
     panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(panel)
@@ -351,6 +363,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if color is None or depth is None:
                 continue
             measured = pitch_from_gravity(gravity)
+            rolled = roll_from_gravity(gravity)
+            if measured is not None:
+                watch.pitch = measured
+            if rolled is not None:
+                watch.roll = rolled
             current = pose
             if listener is not None:
                 import rclpy
