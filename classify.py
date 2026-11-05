@@ -37,9 +37,9 @@ WIDTH_MAX_M = 0.65
 # 实心：白像素至少占外轮廓内部的七成五。线、空心框留不住。
 FILL_MIN = 0.75
 # 边比较直。先按短边的 8% 收成折线，折线离原轮廓也不超过这个距离。
-# 直边本身会有大约 1.5 像素的台阶，这个数留给它。
-# 四到六边直接留下：正面、看见顶面的六边、错开的台阶。
-# 七到八边才比圆度，高于方块（π/4）和圆（1）的中点就丢掉。齿轮的角多于 8 个，也丢掉。
+# 白掩膜边上大约 2.5 像素的台阶和毛刺，这个数留给它。
+# 四到七边直接留下：正面、看见顶面的六边、远处多出来的一个角、错开的台阶。
+# 八边才比圆度，高于方块（π/4）和圆（1）的中点就丢掉。齿轮的角多于 8 个，也丢掉。
 EDGE_SIMPLIFY = 0.08
 CORNER_MIN = 4
 CORNER_MAX = 8
@@ -444,15 +444,15 @@ def _block_shaped(component: np.ndarray) -> bool:
     if len(approx) < CORNER_MIN or len(approx) > CORNER_MAX:
         return False
     # 圆收成折线后仍接近圆。像素台阶会把原轮廓的圆度拉低，所以用折线来比。
-    # 六边是看见顶面的白盒，不再拿圆度丢掉。
+    # 六边和七边是看见顶面的白盒。远处多出一个角仍留下，八边才比圆度。
     poly_peri = float(cv2.arcLength(approx, True))
     poly_area = float(cv2.contourArea(approx))
     circular = poly_peri >= 1e-6 and 4.0 * np.pi * poly_area / (poly_peri * poly_peri) > _CIRCLE_LIMIT
-    if poly_peri < 1e-6 or (len(approx) > 6 and circular):
+    if poly_peri < 1e-6 or (len(approx) > 7 and circular):
         return False
     if poly_area < 0.80 * area or area < 0.80 * poly_area:
         return False
-    return _max_edge_deviation(contour, approx) <= max(1.5, EDGE_SIMPLIFY * short)
+    return _max_edge_deviation(contour, approx) <= max(2.5, EDGE_SIMPLIFY * short)
 
 
 def _white_pieces(white: np.ndarray) -> tuple[np.ndarray, list[tuple[int, int, int, int, int, float, float]]]:

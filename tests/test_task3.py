@@ -356,6 +356,40 @@ def test_curved_white_stays_unknown_and_a_straight_block_still_counts():
     assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "1"
 
 
+def test_distant_hex_with_a_burr_still_counts_as_one_layer():
+    import cv2
+
+    from classify import EDGE_SIMPLIFY, _close_small, _outline
+
+    _, _, offset = _basic()
+    cell = _cell("最近右侧地面")
+    # 35 cm 的盒子投成大约 30 像素，和远处看见顶面的一层一样大。
+    distance = 0.35 * float(INTR.fx) / 30.0
+    pose = _pose_for_camera(cell.x, cell.y - distance, 0.0, offset)
+    color = _blank()
+    _paint_hex(color, pose, 0.0, cell, 0.35, offset=offset)
+    white = np.all(color == 255, axis=2)
+    ys, xs = np.nonzero(white)
+    x = int(xs.max())
+    y = int(np.median(ys[xs == x]))
+    cv2.circle(color, (min(color.shape[1] - 1, x + 2), y), 2, (255, 255, 255), thickness=-1)
+    white = np.all(color == 255, axis=2)
+    closed = _close_small(white)
+    contour = _outline(closed.astype(np.uint8) * 255)
+    _x, _y, width, height = cv2.boundingRect(contour)
+    short = float(min(width, height))
+    assert 24 <= short <= 40
+    approx = cv2.approxPolyDP(contour, max(2.0, EDGE_SIMPLIFY * short), True)
+    assert len(approx) == 7
+    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "1"
+    color = _blank()
+    _paint_disk(color, pose, 0.0, cell, 0.35, offset=offset)
+    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion is None
+    color = _blank()
+    _paint_gear(color, pose, 0.0, cell, 0.35, offset=offset)
+    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion is None
+
+
 def _pose_for_camera(cam_x, cam_y, yaw, offset):
     from car_pose import OPTICAL_FROM_CORNER
 
