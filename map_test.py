@@ -2,10 +2,12 @@
 
 python map_test.py
 
-点下去的是相机光心在地面上的位置。航向在这个窗口里输入，单位是度，正数向左转。
-回车打开相机，退格改数字。刚打开时俯仰用 config/field.yaml 里的角度，读到加速度计之后每帧改用实时俯仰。光心高度仍是 0.70 m。
-摄像头窗口最上面另显示这个实时俯仰。
-关掉相机窗口后回到平面图，可以再点下一个位置。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
+点下去的是相机光心在地面上的位置。点下去就画出从这里看完六格的最短路线。
+再点路线上的圆点，当作车已经到了这一点，光心改到这一站的坐标，窗口列出朝向和俯仰。
+航向在这个窗口里输入，单位是度，正数向左转。没输入时按正前方。改起步光心的航向才重画路线。
+点住某一站之后，航向直接用这一站已经算好的角度，再点同一站换下一格。路线不动。回车就在这一站的坐标打开相机，退格仍可改数字。刚打开时俯仰用 config/field.yaml 里的角度。第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。光心高度仍是 0.70 m。
+摄像头窗口最上面写框正在用的俯仰。
+关掉相机窗口后回到平面图，刚才的路线还在。再点一个新的光心才换路线。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import numpy as np
 
 from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, camera_position, load_intrinsics, load_setup
 from field_map import TOWER_NO, all_cells, tower_cells
+from motion import format_pitch, survey
 from report import FieldWatch
 from view_field import ROOT, _live
 
@@ -68,6 +71,72 @@ def _pixel(x: float, y: float) -> tuple[int, int]:
 
 def _world(u: int, v: int) -> tuple[float, float]:
     return X_MIN + u / SCALE, Y_MAX - v / SCALE
+
+
+def optical_of(x: float, y: float, yaw: float) -> tuple[float, float]:
+    # 路线算的是车位。图上的点和点击都是光心，按同一航向换过去。
+    cam = camera_position(CarPose(x, y, yaw), np.zeros(2), 0.0)
+    return float(cam[0]), float(cam[1])
+
+
+def hit_route(points: list[tuple[float, float]], u: int, v: int) -> int | None:
+    # 点在圆点上，14 个像素以内，当作车已经到达这一站。
+    chosen = None
+    gap = 14.0
+    for index, (x, y) in enumerate(points):
+        su, sv = _pixel(x, y)
+        distance = float(np.hypot(su - u, sv - v))
+        if distance <= gap:
+            gap = distance
+            chosen = index
+    return chosen
+
+
+def camera_point(
+    marker: tuple[float, float] | None,
+    route_points: list[tuple[float, float]],
+    arrived: int | None,
+    pinned: bool,
+) -> tuple[float, float] | None:
+    # 点住某一站时，回车用这一站的光心。没点住就用起步时点下的那个。
+    if pinned and isinstance(arrived, int) and 0 <= arrived < len(route_points):
+        return route_points[arrived]
+    return marker
+
+
+def look_yaw_text(stops: list, arrived: int, look_index: int) -> str | None:
+    # 选中的站用已经算好的朝向。正数向左，和窗口里打的航向同一个方向。
+    if not 0 <= arrived < len(stops):
+        return None
+    looks = stops[arrived].looks
+    if not looks:
+        return None
+    return f"{looks[look_index % len(looks)].yaw_deg:.1f}"
+
+
+def open_yaw(yaw_text: str) -> float | None:
+    # 没打数字时按正前方。打到一半，比如只有负号，先不开。
+    if not yaw_text:
+        return 0.0
+    return _yaw_from_text(yaw_text)
+
+
+def stop_lines(stops: list, index: int, chosen: int = 0) -> list[str]:
+    stop = stops[index]
+    lines = [f"停 {index + 1} / {len(stops)}  已到达"]
+    if not stop.looks:
+        lines.append("这一站没有新的格子")
+    for look_index, look in enumerate(stop.looks):
+        side = "向左" if look.yaw_deg >= 0.0 else "向右"
+        current = "  当前" if stop.looks and look_index == chosen % len(stop.looks) else ""
+        lines.append(
+            f"{look.number}  朝向 {side} {abs(look.yaw_deg):.0f} 度   {format_pitch(look.pitch_deg)}{current}"
+        )
+    lines.append("完成识别")
+    seen = {look.number for item in stops for look in item.looks}
+    if index == len(stops) - 1 and seen >= set("123456"):
+        lines.append("六格到此看完，停止")
+    return lines
 
 
 def _edge_lines() -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -274,6 +343,10 @@ def _draw_map(
     hover: tuple[float, float] | None = None,
     yaw_text: str = "",
     used: list[UsedPoint] | None = None,
+    route_line: list[tuple[float, float]] | None = None,
+    route_stops: list[tuple[float, float]] | None = None,
+    arrived: int | None = None,
+    arrived_lines: list[str] | None = None,
 ) -> np.ndarray:
     import cv2
     from PIL import Image, ImageDraw, ImageFont
@@ -316,6 +389,15 @@ def _draw_map(
     ox, oy = _pixel(0.0, 0.0)
     draw.ellipse((ox - 4, oy - 4, ox + 4, oy + 4), fill=(255, 80, 80))
     draw.text((ox + 8, oy - 8), "原点", font=font, fill=(255, 180, 180))
+    if route_line and len(route_line) >= 2:
+        draw.line([_pixel(x, y) for x, y in route_line], fill=(255, 140, 0), width=3)
+    for index, point in enumerate(route_stops or [], start=1):
+        u, v = _pixel(*point)
+        if arrived == index - 1:
+            draw.ellipse((u - 8, v - 8, u + 8, v + 8), fill=(255, 140, 0), outline=(255, 230, 160))
+        else:
+            draw.ellipse((u - 7, v - 7, u + 7, v + 7), outline=(255, 140, 0), width=2)
+        draw.text((u + 10, v - 10), str(index), font=font, fill=(255, 190, 90))
     if marker is not None:
         u, v = _pixel(*marker)
         draw.ellipse((u - 6, v - 6, u + 6, v + 6), outline=(255, 220, 0), width=2)
@@ -329,8 +411,12 @@ def _draw_map(
         if used:
             hint = f"点新的光心，或按 1 到 {len(used)} 选用之前的点。俯仰 {pitch:.0f} 度。q 退出"
     else:
-        hint = f"航向 {yaw_text} 度，正数向左转。回车打开相机，退格修改。俯仰 {pitch:.0f} 度。q 退出"
+        hint = "点路线上的圆点，光心和航向改到这一站算出的角度。再点同一站换下一格。回车打开相机。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
+    text_y = 56
+    for row in arrived_lines or []:
+        draw.text((8, text_y), row, font=font, fill=(255, 210, 120))
+        text_y += 20
     history = _history_lines(used or [])
     line_h = 20
     y = board.shape[0] - 8 - line_h * len(history)
@@ -367,18 +453,36 @@ def main() -> None:
     import cv2
 
     pitch = load_setup(str(ROOT / "config" / "field.yaml")).pitch_deg
+    intrinsics = load_intrinsics(str(ROOT / "config" / "intrinsics.yaml"))
     picked: dict[str, tuple[float, float] | None] = {"xy": None}
     chosen: dict[str, UsedPoint | None] = {"point": None}
     hover: dict[str, tuple[float, float] | None] = {"xy": None}
+    view: dict[str, object] = {"stops": [], "arrived": None, "pinned": False, "look": 0, "auto_yaw": None}
     used = load_points(_POINTS_PATH)
     marker: tuple[float, float] | None = None
     yaw_text = ""
+    route_key = None
+    route_stops: list = []
+    route_line: list[tuple[float, float]] = []
+    route_points: list[tuple[float, float]] = []
 
     def on_mouse(event, u, v, _flags, _param) -> None:
         xy = _snap_cursor(*_world(u, v))
         if event == cv2.EVENT_MOUSEMOVE:
             hover["xy"] = xy
         elif event == cv2.EVENT_LBUTTONDOWN:
+            arrived = hit_route(view["stops"], u, v)
+            if arrived is not None:
+                if view["pinned"] and view["arrived"] == arrived:
+                    view["look"] = int(view["look"]) + 1
+                else:
+                    view["look"] = 0
+                view["arrived"] = arrived
+                view["pinned"] = True
+                text = look_yaw_text(route_stops, arrived, int(view["look"]))
+                if text is not None:
+                    view["auto_yaw"] = text
+                return
             hit = _hit_used(used, u, v)
             if hit is not None:
                 chosen["point"] = hit
@@ -391,16 +495,65 @@ def main() -> None:
     cv2.setMouseCallback(window, on_mouse)
 
     while True:
+        if view["auto_yaw"] is not None:
+            yaw_text = str(view["auto_yaw"])
+            view["auto_yaw"] = None
         if chosen["point"] is not None:
             hit = chosen["point"]
             chosen["point"] = None
             marker = (hit.x, hit.y)
             yaw_text = hit.yaw_text
+            view["pinned"] = False
         elif picked["xy"] is not None:
             marker = picked["xy"]
             picked["xy"] = None
+            view["pinned"] = False
         yaw = _yaw_from_text(yaw_text) if marker is not None else None
-        cv2.imshow(window, _draw_map(marker, yaw, pitch, hover["xy"], yaw_text, used))
+        heading = 0.0 if yaw is None else yaw
+        key = None if marker is None else (round(marker[0], 4), round(marker[1], 4), round(heading, 5))
+        # 点住某一站之后，数字只改这一站的航向，不把路线和坐标重算掉。
+        if not view["pinned"] and key != route_key:
+            route_key = key
+            view["arrived"] = 0 if key is not None else None
+            if marker is None:
+                route_stops = []
+                route_line = []
+                route_points = []
+            else:
+                pose = pose_for_optical(marker[0], marker[1], heading)
+                route_stops, line = survey(pose, np.zeros(2, dtype=float), intrinsics)
+                route_line = [optical_of(x, y, heading) for x, y in line]
+                route_points = [optical_of(stop.x, stop.y, heading) for stop in route_stops]
+            view["stops"] = route_points
+        arrived = view["arrived"]
+        where = camera_point(
+            marker,
+            route_points,
+            arrived if isinstance(arrived, int) else None,
+            bool(view["pinned"]),
+        )
+        lines = []
+        if route_stops and isinstance(arrived, int) and 0 <= arrived < len(route_stops):
+            lines = stop_lines(route_stops, arrived, int(view["look"]) if view["pinned"] else 0)
+        if where is not None:
+            lines.insert(0, f"光心  x {where[0]:+.3f} m  y {where[1]:+.3f} m  航向 {yaw_text or '0'}")
+        shown = where if view["pinned"] else marker
+        shown_yaw = open_yaw(yaw_text) if view["pinned"] else (heading if marker is not None else None)
+        cv2.imshow(
+            window,
+            _draw_map(
+                shown,
+                shown_yaw,
+                pitch,
+                hover["xy"],
+                yaw_text,
+                used,
+                route_line,
+                route_points,
+                arrived if isinstance(arrived, int) else None,
+                lines,
+            ),
+        )
         action = _yaw_key(cv2.waitKeyEx(30))
         if marker is None:
             if action in ("quit", "esc"):
@@ -411,16 +564,15 @@ def main() -> None:
                 yaw_text = earlier.yaw_text
             continue
         if action == "ok":
-            if yaw is None:
+            opening = open_yaw(yaw_text)
+            if where is None or opening is None:
                 continue
-            used = remember_point(used, marker[0], marker[1], yaw_text)
+            used = remember_point(used, where[0], where[1], yaw_text or "0")
             save_points(_POINTS_PATH, used)
             cv2.destroyWindow(window)
-            _open_camera(marker[0], marker[1], yaw, pitch)
+            _open_camera(where[0], where[1], opening, pitch)
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
             cv2.setMouseCallback(window, on_mouse)
-            marker = None
-            yaw_text = ""
             continue
         if action in ("quit", "esc"):
             break

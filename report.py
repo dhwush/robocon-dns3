@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from car_pose import CarPose, Intrinsics, Setup, pose_moved
+import math
+
+from car_pose import CarPose, Intrinsics, Setup, pitch_from_start, pose_moved
 from classify import inspect_frame
 from field_map import DISPLAY, TOWER_NO
-from motion import next_action
+from motion import ARRIVE_M, MAX_TRIES, place_done, plan_action
 from vote import Vote
 
 
@@ -60,6 +62,11 @@ def light_from_key(key: int) -> str | None:
     return None
 
 
+def summary_lines(locked: dict[str, str | None]) -> list[str]:
+    # 六格都走完以后，按窗口编号把锁定的结果再列一遍。
+    return ["总结"] + [f"{TOWER_NO[name]} {locked[name]}" for name in DISPLAY]
+
+
 def plain_state(view, locked: str | None, mode: str) -> str:
     if mode == "basic":
         if locked and view.in_view:
@@ -103,6 +110,8 @@ class FieldWatch:
         self.setup = setup
         self.intr = intr
         self.pitch = float(setup.pitch_deg)
+        self.pitch_base = float(setup.pitch_deg)
+        self.pitch_ref: float | None = None
         self.roll = 0.0
         self.votes = {name: Vote() for name in DISPLAY}
         self.last_pose: CarPose | None = None
@@ -111,6 +120,19 @@ class FieldWatch:
         self.light_hand = False
         self.views = None
         self.have_color = False
+        self.tries = {name: 0 for name in DISPLAY}
+        self.barren = {name: 0 for name in DISPLAY}
+        self.visited: list[tuple[float, float]] = []
+        self.hold = None
+
+    def follow_pitch(self, measured: float | None) -> None:
+        # 打开时的俯仰就是一开始的框。第一次读数对上这个框，之后只加变化。
+        if measured is None:
+            return
+        if self.pitch_ref is None:
+            self.pitch_ref = float(measured)
+            self.pitch_base = float(self.pitch)
+        self.pitch = pitch_from_start(self.pitch_base, self.pitch_ref, measured)
 
     def choose_light(self, level: str) -> None:
         # 人按过数字键之后，不再自动改档，免得和手上的选择对着干。
@@ -124,9 +146,15 @@ class FieldWatch:
         if not self.setup.ready or self.setup.center_to_corner is None:
             self.views = None
             return
-        if pose_moved(self.last_pose, pose):
+        if self.last_pose is not None and pose_moved(self.last_pose, pose):
             for vote in self.votes.values():
                 vote.on_move()
+            moved = math.hypot(pose.x - self.last_pose.x, pose.y - self.last_pose.y)
+            if moved > 0.02:
+                # 换了地方，五个视角重新看。原来的落点不再回去。
+                self.visited.append((self.last_pose.x, self.last_pose.y))
+                self.tries = {name: 0 for name in DISPLAY}
+            self.barren = {name: 0 for name in DISPLAY}
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(
@@ -145,6 +173,7 @@ class FieldWatch:
         if color is not None:
             for name, view in self.views.items():
                 self.votes[name].see(view.conclusion)
+            self._note_aim()
 
     def lines(self, mode: str) -> list[str]:
         if not self.setup.ready or self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
@@ -157,16 +186,29 @@ class FieldWatch:
                     rows.append(f"{name} {locked[name]}")
             return rows
         rows = [f"{name} {locked[name] or '还没看清'}" for name in DISPLAY]
-        action = next_action(
+        action = plan_action(
             self.views,
             locked,
             self.last_pose,
             self.setup.center_to_corner,
             self.pitch,
             self.have_color,
+            self.intr,
+            self.tries,
+            self.visited,
         )
-        if action:
-            rows.append(action)
+        self._sync_attempt(action)
+        text = self._held(action)
+        if (
+            text
+            and place_done(locked, self.last_pose, self.setup.center_to_corner, self.intr)
+            and (text == "停止" or "平移" in text)
+        ):
+            rows.append("完成识别")
+        if text:
+            rows.append(text)
+        if text == "停止" and all(locked.get(name) for name in DISPLAY):
+            rows.extend(summary_lines(locked))
         return rows
 
     def window_lines(self, mode: str) -> list[str]:
@@ -180,7 +222,65 @@ class FieldWatch:
         locked = {name: vote.locked for name, vote in self.votes.items()}
         for name in sorted(DISPLAY, key=lambda item: TOWER_NO[item]):
             rows.append(f"{TOWER_NO[name]}：{plain_state(self.views[name], locked[name], mode)}")
-        if mode == "extend" and len(official) == len(DISPLAY) + 1:
-            rows.append(official[-1])
+        if mode == "extend" and len(official) > len(DISPLAY):
+            rows.extend(official[len(DISPLAY) :])
         return rows
+
+    def _sync_attempt(self, action) -> None:
+        if action is None or action.cell is None:
+            return
+        if action.kind in ("pitch", "yaw", "wait") and action.attempt > self.tries.get(action.cell, 0):
+            self.tries[action.cell] = action.attempt
+
+    def _note_aim(self) -> None:
+        if self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
+            return
+        locked = {name: vote.locked for name, vote in self.votes.items()}
+        action = plan_action(
+            self.views,
+            locked,
+            self.last_pose,
+            self.setup.center_to_corner,
+            self.pitch,
+            True,
+            self.intr,
+            self.tries,
+            self.visited,
+        )
+        self._sync_attempt(action)
+        if action is None or action.kind != "wait" or action.cell is None:
+            return
+        if self.views[action.cell].conclusion is not None:
+            self.barren[action.cell] = 0
+            return
+        self.barren[action.cell] += 1
+        if self.barren[action.cell] < 30:
+            return
+        self.tries[action.cell] = min(MAX_TRIES, self.tries[action.cell] + 1)
+        self.barren[action.cell] = 0
+
+    def _arrived(self, hold) -> bool:
+        pose = self.last_pose
+        if pose is None:
+            return False
+        if hold.kind == "pitch":
+            return abs(self.pitch - float(hold.pitch)) <= 1.0
+        if hold.kind == "yaw":
+            turn = math.atan2(math.sin(pose.yaw - float(hold.yaw)), math.cos(pose.yaw - float(hold.yaw)))
+            return abs(math.degrees(turn)) <= 1.0
+        if hold.kind == "move":
+            return math.hypot(pose.x - float(hold.x), pose.y - float(hold.y)) <= ARRIVE_M
+        return True
+
+    def _held(self, action) -> str | None:
+        if action is None or action.kind in ("wait", "idle"):
+            self.hold = None
+            return None
+        if action.kind in ("stop", "stuck"):
+            self.hold = None
+            return action.text
+        if self.hold is not None and not self._arrived(self.hold):
+            return self.hold.text
+        self.hold = action
+        return action.text
 

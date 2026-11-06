@@ -214,6 +214,11 @@ def _gravity_down(gravity: np.ndarray | None) -> np.ndarray | None:
     return down / norm
 
 
+def pitch_from_start(base_deg: float, first_deg: float, measured_deg: float) -> float:
+    # 一开始的框用 base。第一次读数只记下，不挪框。之后变多少度，框就跟着变多少。
+    return float(base_deg) + (float(measured_deg) - float(first_deg))
+
+
 def pitch_from_gravity(gravity: np.ndarray | None) -> float | None:
     # 彩色相机系里的重力方向。正数是抬头，单位度。相机 Z 向前，抬头时重力的前向分量是负的。
     down = _gravity_down(gravity)
@@ -236,4 +241,16 @@ def shifted_pose(pose: CarPose, lateral_m: float) -> CarPose:
     right = np.array([yaw_c, yaw_s], dtype=float)
     xy = np.array([pose.x, pose.y], dtype=float) + lateral_m * right
     return CarPose(float(xy[0]), float(xy[1]), pose.yaw, pose.stamp)
+
+
+def bearing_deg(point: np.ndarray, pose: CarPose, center_to_corner: np.ndarray) -> float:
+    # 地面上的方位。正数在车的右侧，身后的目标大于 90 度。不随俯仰改变。
+    origin = camera_position(pose, center_to_corner, 0.0)
+    dx = float(point[0] - origin[0])
+    dy = float(point[1] - origin[1])
+    ahead = -float(np.sin(pose.yaw)) * dx + float(np.cos(pose.yaw)) * dy
+    right = float(np.cos(pose.yaw)) * dx + float(np.sin(pose.yaw)) * dy
+    if abs(ahead) < 1e-9 and abs(right) < 1e-9:
+        return 0.0
+    return float(np.degrees(np.arctan2(right, ahead)))
 

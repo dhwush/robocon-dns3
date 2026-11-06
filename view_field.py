@@ -7,7 +7,8 @@ python view_field.py basic
 python view_field.py extend
 
 打开画面后按 1 到 5 换光线：很亮、白天、室内、偏暗、很暗。按 q 或 Esc 退出。
-画面最上面写加速度计读出的实时俯仰，正数是抬头。读得到时，这一帧的认塔和画框都用这个角度。
+画面最上面写框正在用的俯仰，正数是抬头。刚打开用配置里的角度，
+第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。左右转先不改。
 """
 
 from __future__ import annotations
@@ -364,8 +365,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 continue
             measured = pitch_from_gravity(gravity)
             rolled = roll_from_gravity(gravity)
-            if measured is not None:
-                watch.pitch = measured
+            watch.follow_pitch(measured)
             if rolled is not None:
                 watch.roll = rolled
             current = pose
@@ -387,7 +387,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 print(text)
                 previous = text
             locked = {name: vote.locked for name, vote in watch.votes.items()}
-            painted = [live_pitch_line(measured)] + shown
+            painted = [live_pitch_line(None if measured is None else watch.pitch)] + shown
             cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):

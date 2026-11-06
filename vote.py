@@ -1,11 +1,11 @@
-"""连续 5 帧同一结论才锁定。锁定后，还没看清的帧跳过。另有 5 帧别的结论才改锁。"""
+"""连续 15 帧同一结论才锁定。锁定后，还没看清的帧跳过。另有 15 帧别的结论才改锁。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 
-LOCK_FRAMES = 5
+LOCK_FRAMES = 15
 
 
 @dataclass

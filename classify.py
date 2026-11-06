@@ -1,9 +1,10 @@
-"""一帧里每一格的结论。对不上三档，或白块不是实心直边，就保持未知。
+"""一帧里每一格的结论。对不上三档就保持未知。没有深度时，白块不是实心直边也保持未知。
 
 搜索框只决定白块属于哪一格：质心落在框里，宽度和高度量整块，不再先和框相与。
 近处白块顶边或左右贴到画面边，或整块宽过 65 cm，彩色这条不收。
 底边被切掉、顶边还在里面时，用车位把顶边换成离地高度，仍走彩色。
 0.3 m 到 3 m 里，只要有足够的白点落在这一格，层数用最高一截的离地高度。
+整块在画面里、彩色轮廓收不成直边时，这段对上了层高的深度仍然写。
 远处没有深度时，用整块的像素高度。彩色上对不上形状的，保持未知，不写成空。
 框里的白被切碎，或只剩不够 15 cm 的一截，同样保持未知，不写成空。
 三层塔的阵营看贴在白盒顶上的像素带，从上往下认。和顶边隔开的红蓝不算。分不出先后就保持未知，不写成两层。
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from car_pose import CarPose, Intrinsics, camera_frame, project, to_camera
+from car_pose import CarPose, Intrinsics, bearing_deg, camera_frame, project, to_camera
 from field_map import MARGIN_M, Cell, tower_cells
 from sight import sees, visible_height
 
@@ -100,8 +101,9 @@ def _inside(pixel: np.ndarray | None, intr: Intrinsics) -> bool:
 
 
 def _bearing_deg(point: np.ndarray, pose: CarPose, offset: np.ndarray, pitch: float) -> float:
-    cam = to_camera(point, pose, offset, pitch)
-    return float(np.degrees(np.arctan2(cam[0], max(cam[2], 1e-6))))
+    # 俯仰不参与。身后的格子按真实转角算，不再被夹成 90 度。
+    del pitch
+    return bearing_deg(point, pose, offset)
 
 
 def _pitch_target(cell: Cell, pose: CarPose, offset: np.ndarray) -> float:
@@ -554,7 +556,7 @@ def _classify_cell(
     region = _outline(mask)
 
     def pack(conclusion, frac: float, mean_v: float, piece=None, method=None, hold=False) -> CellView:
-        # 深度已经量到、彩色又没把整块看全的格，先留在这里记满 5 帧。
+        # 深度已经量到、彩色又没把整块看全的格，先留在这里记满 15 帧。
         return CellView(
             conclusion,
             True if hold else in_view,
@@ -637,10 +639,9 @@ def _classify_cell(
     )
     if cap_unclear:
         return pack(None, frac, mean_v, depth_piece)
-    # 落在这一格里的深度点够，就用离地高度，不再只在贴边或过宽时才用。
-    # 圆和锯齿没有被收下时，不用深度把它们写成塔。
-    depth_ready = bool(accepted) or clipped or overwide or saw_outside or not color_usable
-    if depth is not None and depth_state is not None and depth_ready:
+    # 白点落在这一格 50 cm 里，最高一截对上一层或两层，就写层数。
+    # 整块在画面里、和木板粘在一起收不成直边时，也用这段深度。
+    if depth is not None and depth_state is not None:
         return pack(depth_state, frac, mean_v, depth_piece, "深度", hold=not accepted)
     if accepted:
         two_h = visible_height(pose, offset, pitch, cell, cell.base_z, cell.two_z)
