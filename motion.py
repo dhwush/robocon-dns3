@@ -59,6 +59,10 @@ class Action:
     y: float | None = None
     cell: str | None = None
     attempt: int = 0
+    final_x: float | None = None
+    final_y: float | None = None
+    chase_to: str | None = None
+    cells: tuple[str, ...] = ()
 
 
 def format_yaw(bearing_deg_value: float) -> str:
@@ -480,12 +484,95 @@ def _search(
     return stops, line
 
 
+def _move_toward(
+    pose: CarPose,
+    x: float,
+    y: float,
+    line: list[tuple[float, float]],
+    chase_to: str | None,
+    cells: tuple[str, ...],
+) -> Action | None:
+    # 指令先指到下一折点。final 是这次要去认的落点。
+    turn = line[1] if len(line) > 1 else (x, y)
+    if math.hypot(turn[0] - pose.x, turn[1] - pose.y) < ARRIVE_M and len(line) > 2:
+        turn = line[2]
+    elif math.hypot(turn[0] - pose.x, turn[1] - pose.y) < ARRIVE_M:
+        turn = (x, y)
+    target = CarPose(turn[0], turn[1], pose.yaw, pose.stamp)
+    text = _move_text(pose, target)
+    if text is None:
+        return None
+    return Action(
+        "move",
+        text,
+        x=target.x,
+        y=target.y,
+        final_x=x,
+        final_y=y,
+        chase_to=chase_to,
+        cells=cells,
+    )
+
+
+def _point_used(x: float, y: float, points: list[tuple[float, float]]) -> bool:
+    return any(math.hypot(x - px, y - py) < 0.25 for px, py in points)
+
+
+def _return_visit(
+    pose: CarPose,
+    offset: np.ndarray,
+    intr: Intrinsics,
+    need: list[str],
+    visited: list[tuple[float, float]],
+    used: dict[str, list[tuple[float, float]]],
+) -> Action | None:
+    # 已到过、而且这格转正还能看清的点，取路程最短的一个。当前点和用过的点跳过。
+    if not need or not visited:
+        return None
+    cells = _cells()
+    extras = _bypass_points()
+    best = None
+    for x, y in visited:
+        if math.hypot(x - pose.x, y - pose.y) < ARRIVE_M:
+            continue
+        stood = CarPose(x, y, pose.yaw, pose.stamp)
+        useful = []
+        for name in need:
+            if _point_used(x, y, used.get(name, [])):
+                continue
+            if fits_when_aimed(cells[name], stood, offset, intr):
+                useful.append(name)
+        if not useful:
+            continue
+        trip = _travel(pose.x, pose.y, x, y, extras)
+        if trip is None:
+            continue
+        if best is None or trip[0] < best[0]:
+            best = (trip[0], x, y, trip[1], tuple(useful))
+    if best is None:
+        return None
+    _cost, x, y, line, useful = best
+    return _move_toward(pose, x, y, line, "revisit", useful)
+
+
+def _leg_cost(pose: CarPose, action: Action | None) -> float | None:
+    # 比的是绕开方台之后的路程，不是新旧。
+    if action is None or action.final_x is None or action.final_y is None:
+        return None
+    trip = _travel(pose.x, pose.y, action.final_x, action.final_y, _bypass_points())
+    if trip is None:
+        return None
+    return trip[0]
+
+
 def _relocate(
     pose: CarPose,
     offset: np.ndarray,
     intr: Intrinsics,
     need: list[str],
     visited: list[tuple[float, float]],
+    chase_to: str | None = None,
+    cells: tuple[str, ...] = (),
 ) -> Action:
     # 能不能定，按转到正中、俯仰对准之后算。总路程短的优先。原点不参与比较。
     planned = _search(pose, offset, intr, need, visited)
@@ -495,21 +582,20 @@ def _relocate(
     if not stops or len(line) < 2:
         return _fallback(pose, need, visited)
     x, y, _named = stops[0]
-    turn = line[1]
+    turn = line[1] if len(line) > 1 else (x, y)
     if math.hypot(turn[0] - pose.x, turn[1] - pose.y) < ARRIVE_M and len(line) > 2:
         turn = line[2]
     elif math.hypot(turn[0] - pose.x, turn[1] - pose.y) < ARRIVE_M:
         turn = (x, y)
     # 这一步能直达落点时，落点本身要能看清。折点只是绕台，到了再算。
-    target = CarPose(turn[0], turn[1], pose.yaw, pose.stamp)
     if abs(turn[0] - x) < 1e-6 and abs(turn[1] - y) < 1e-6:
-        cells = _cells()
-        if not any(fits_when_aimed(cells[name], target, offset, intr) for name in need):
+        stood = CarPose(x, y, pose.yaw, pose.stamp)
+        if not any(fits_when_aimed(_cells()[name], stood, offset, intr) for name in need):
             return _fallback(pose, need, visited)
-    text = _move_text(pose, target)
-    if text is None:
+    action = _move_toward(pose, x, y, line, chase_to, cells)
+    if action is None:
         return _fallback(pose, need, visited)
-    return Action("move", text, x=target.x, y=target.y)
+    return action
 
 
 def survey(pose: CarPose, offset: np.ndarray, intr: Intrinsics) -> tuple[list[RouteStop], list[tuple[float, float]]]:
@@ -600,11 +686,22 @@ def plan_action(
     intr: Intrinsics | None = None,
     tries: dict[str, int] | None = None,
     visited: list[tuple[float, float]] | None = None,
+    recheck: dict[str, bool] | None = None,
+    used: dict[str, list[tuple[float, float]]] | None = None,
+    chase: dict[str, str] | None = None,
 ) -> Action | None:
     names = [cell.name for cell in tower_cells()]
-    if all(locked.get(name) for name in names):
+    doubt = recheck or {}
+    spent = used or {}
+    stage = chase or {}
+    done = {name for name in names if stage.get(name) == "done"}
+    if all((locked.get(name) and not doubt.get(name)) or name in done for name in names):
         return Action("stop", "停止")
-    pending = [name for name in names if not locked.get(name)]
+    pending = [
+        name
+        for name in names
+        if name not in done and (not locked.get(name) or doubt.get(name))
+    ]
     attempt = tries or {}
     been = visited or []
     cells = _cells()
@@ -613,12 +710,21 @@ def plan_action(
         return int(attempt.get(name, 0))
 
     def can_aim(name: str) -> bool:
-        # 已经看见两层或塔顶，继续转、继续俯仰，把这一格锁上，不为它平移。
+        # 五个视角用完就不再守在这里。两层或塔顶还没锁定时，视角没用完就继续对正。
+        if attempt_of(name) >= MAX_TRIES:
+            return False
+        if doubt.get(name):
+            if intr is None:
+                return not views[name].blocked
+            return fits_when_aimed(cells[name], pose, offset, intr) or views[name].conclusion in (
+                "2",
+                "红",
+                "蓝",
+            )
         if views[name].conclusion in ("2", "红", "蓝"):
             return True
         if intr is None:
-            return not views[name].blocked and attempt_of(name) < MAX_TRIES
-        # 转到正中、俯仰对准还能看清时，视角用完也接着看，不因此平移。
+            return not views[name].blocked
         return fits_when_aimed(cells[name], pose, offset, intr)
 
     missed: list[str] = []
@@ -659,7 +765,30 @@ def plan_action(
     need = [name for name in pending if name in missed or not can_aim(name)]
     if not need:
         return None
-    return _relocate(pose, offset, intr, need, been)
+    again = []
+    rest = []
+    for name in need:
+        should = fits_when_aimed(cells[name], pose, offset, intr)
+        # 这个角度理应看见却没稳定结果，或和旧结论冲突，才换个地方重看。
+        if doubt.get(name) or (should and not locked.get(name)):
+            again.append(name)
+        else:
+            rest.append(name)
+    if again:
+        # 已到过的点和新找的落点放在一起，只留路程更短的那个。
+        back = _return_visit(pose, offset, intr, again, been, spent)
+        found = _relocate(pose, offset, intr, again, been, "fresh", tuple(again))
+        back_cost = _leg_cost(pose, back)
+        new_cost = _leg_cost(pose, found)
+        if back is not None and back_cost is not None and (new_cost is None or back_cost < new_cost):
+            return back
+        if found is not None:
+            return found
+        if back is not None:
+            return back
+    if not rest:
+        return None
+    return _relocate(pose, offset, intr, rest, been)
 
 
 def next_action(
@@ -672,8 +801,13 @@ def next_action(
     intr: Intrinsics | None = None,
     tries: dict[str, int] | None = None,
     visited: list[tuple[float, float]] | None = None,
+    recheck: dict[str, bool] | None = None,
+    used: dict[str, list[tuple[float, float]]] | None = None,
+    chase: dict[str, str] | None = None,
 ) -> str | None:
-    action = plan_action(views, locked, pose, offset, pitch, have_color, intr, tries, visited)
+    action = plan_action(
+        views, locked, pose, offset, pitch, have_color, intr, tries, visited, recheck, used, chase
+    )
     if action is None or action.kind == "wait":
         return None
     return action.text

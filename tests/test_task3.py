@@ -578,7 +578,19 @@ def test_narrow_white_stays_unknown_and_does_not_keep_a_wrong_empty():
         watch.update(pose, short)
     assert watch.votes[cell.name].locked == "0"
     watch.update(pose, one)
-    assert watch.votes[cell.name].locked == "1"
+    vote = watch.votes[cell.name]
+    assert vote.locked == "0"
+    assert vote.recheck
+    vote.ready = True
+    for _ in range(LOCK_FRAMES):
+        vote.see("1")
+    assert vote.locked == "1"
+    assert vote.recheck is False
+    for name, other in watch.votes.items():
+        if name != cell.name:
+            other.locked = "0"
+            other.recheck = False
+    assert watch.lines("extend")[-1] == "6 1"
     watch.update(pose, _blank())
     assert watch.votes[cell.name].locked == "1"
 
@@ -726,24 +738,52 @@ def test_pitch_comes_before_yaw_after_the_current_view_is_read():
     assert next_action(views, locked, pose, OFFSET, 0.0, True) == "向左转 38 度"
 
 
-def test_five_looks_do_not_turn_into_a_move_when_the_cell_still_fits():
+def test_remaining_view_stays_put_and_exhausted_view_moves():
     from classify import CellView
-    from motion import MAX_TRIES, fits_when_aimed, next_action
+    from motion import MAX_TRIES, _bypass_points, _ground_blocked, _travel, fits_when_aimed, next_action, plan_action
 
     pose = CarPose(0.0, 0.0, 0.0)
     names = [cell.name for cell in tower_cells()]
     target = names[0]
-    assert fits_when_aimed(_cell(target), pose, OFFSET, INTR)
+    cell = _cell(target)
+    assert fits_when_aimed(cell, pose, OFFSET, INTR)
     locked = {name: "0" for name in names}
     locked[target] = None
     views = {
         name: CellView(None, False, False, False, False, 0.0, 0.0, 0.0, 255.0) for name in names
     }
     views[target] = CellView(None, False, True, False, False, 40.0, -6.0, 0.0, 255.0)
-    text = next_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES})
+    text = next_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES - 1})
     assert text is not None
     assert "平移" not in text
     assert "度" in text
+    fresh = plan_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES})
+    assert fresh is not None and fresh.kind == "move" and fresh.final_x is not None and fresh.final_y is not None
+    new_trip = _travel(pose.x, pose.y, fresh.final_x, fresh.final_y, _bypass_points())
+    assert new_trip is not None
+    near = far = None
+    for x in np.linspace(-2.0, 1.5, 15):
+        for y in np.linspace(-1.5, 0.6, 10):
+            if _ground_blocked(float(x), float(y)):
+                continue
+            stood = CarPose(float(x), float(y), 0.0)
+            if not fits_when_aimed(cell, stood, OFFSET, INTR):
+                continue
+            trip = _travel(pose.x, pose.y, float(x), float(y), _bypass_points())
+            if trip is None:
+                continue
+            if trip[0] + 0.3 < new_trip[0]:
+                near = (float(x), float(y))
+            elif trip[0] > new_trip[0] + 0.3:
+                far = (float(x), float(y))
+    assert near is not None and far is not None
+    closer = plan_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES}, [near])
+    assert closer is not None and closer.final_x is not None
+    assert abs(closer.final_x - near[0]) < 1e-6 and abs(closer.final_y - near[1]) < 1e-6
+    farther = plan_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES}, [far])
+    assert farther is not None and farther.final_x is not None
+    assert abs(farther.final_x - fresh.final_x) < 1e-6
+    assert abs(farther.final_y - fresh.final_y) < 1e-6
 
 
 def test_blocked_cell_asks_for_one_slide_when_the_view_is_open():

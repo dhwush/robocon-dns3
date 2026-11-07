@@ -63,8 +63,8 @@ def light_from_key(key: int) -> str | None:
 
 
 def summary_lines(locked: dict[str, str | None]) -> list[str]:
-    # 六格都走完以后，按窗口编号把锁定的结果再列一遍。
-    return ["总结"] + [f"{TOWER_NO[name]} {locked[name]}" for name in DISPLAY]
+    # 六格都走完以后，按窗口编号把最终结果再列一遍。没定下来的仍是还没看清。
+    return ["总结"] + [f"{TOWER_NO[name]} {locked[name] or '还没看清'}" for name in DISPLAY]
 
 
 def plain_state(view, locked: str | None, mode: str) -> str:
@@ -123,6 +123,9 @@ class FieldWatch:
         self.tries = {name: 0 for name in DISPLAY}
         self.barren = {name: 0 for name in DISPLAY}
         self.visited: list[tuple[float, float]] = []
+        self.used = {name: [] for name in DISPLAY}
+        self.chase = {name: "local" for name in DISPLAY}
+        self.goal: dict[str, tuple[float, float, str]] = {}
         self.hold = None
 
     def follow_pitch(self, measured: float | None) -> None:
@@ -151,7 +154,8 @@ class FieldWatch:
                 vote.on_move()
             moved = math.hypot(pose.x - self.last_pose.x, pose.y - self.last_pose.y)
             if moved > 0.02:
-                # 换了地方，五个视角重新看。原来的落点不再回去。
+                # 换了地方，五个视角重新看。重看落到预定的点上，才记成旧点或新点。
+                self._note_arrival(pose)
                 self.visited.append((self.last_pose.x, self.last_pose.y))
                 self.tries = {name: 0 for name in DISPLAY}
             self.barren = {name: 0 for name in DISPLAY}
@@ -172,7 +176,13 @@ class FieldWatch:
             self.light, self.light_wait = step_light(self.light, frac, mean_v, self.light_wait)
         if color is not None:
             for name, view in self.views.items():
-                self.votes[name].see(view.conclusion)
+                vote = self.votes[name]
+                was = vote.recheck
+                vote.see(view.conclusion)
+                if vote.recheck and not was:
+                    # 冲突出现在当前视角，剩下的俯仰和偏角先用完，车先不走。
+                    self.tries[name] = min(MAX_TRIES, self.tries[name] + 1)
+                    vote.ready = False
             self._note_aim()
 
     def lines(self, mode: str) -> list[str]:
@@ -186,6 +196,7 @@ class FieldWatch:
                     rows.append(f"{name} {locked[name]}")
             return rows
         rows = [f"{name} {locked[name] or '还没看清'}" for name in DISPLAY]
+        self._abandon()
         action = plan_action(
             self.views,
             locked,
@@ -196,18 +207,23 @@ class FieldWatch:
             self.intr,
             self.tries,
             self.visited,
+            {name: vote.recheck for name, vote in self.votes.items()},
+            self.used,
+            self.chase,
         )
         self._sync_attempt(action)
         text = self._held(action)
+        doubting = any(vote.recheck for vote in self.votes.values())
         if (
             text
+            and not doubting
             and place_done(locked, self.last_pose, self.setup.center_to_corner, self.intr)
             and (text == "停止" or "平移" in text)
         ):
             rows.append("完成识别")
         if text:
             rows.append(text)
-        if text == "停止" and all(locked.get(name) for name in DISPLAY):
+        if text == "停止" and all(self._settled(name) for name in DISPLAY):
             rows.extend(summary_lines(locked))
         return rows
 
@@ -232,22 +248,70 @@ class FieldWatch:
         if action.kind in ("pitch", "yaw", "wait") and action.attempt > self.tries.get(action.cell, 0):
             self.tries[action.cell] = action.attempt
 
-    def _note_aim(self) -> None:
-        if self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
-            return
-        locked = {name: vote.locked for name, vote in self.votes.items()}
-        action = plan_action(
+    def _settled(self, name: str) -> bool:
+        vote = self.votes[name]
+        if self.chase[name] == "done":
+            return True
+        return vote.locked is not None and not vote.recheck
+
+    def _plan(self, have_color: bool):
+        return plan_action(
             self.views,
-            locked,
+            {name: vote.locked for name, vote in self.votes.items()},
             self.last_pose,
             self.setup.center_to_corner,
             self.pitch,
-            True,
+            have_color,
             self.intr,
             self.tries,
             self.visited,
+            {name: vote.recheck for name, vote in self.votes.items()},
+            self.used,
+            self.chase,
         )
+
+    def _abandon(self) -> None:
+        # 已经为这一格挪过一次，视角再用完仍没有稳定结论，就留下旧结果或还没看清。
+        if self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
+            return
+        for name, vote in self.votes.items():
+            if self.chase[name] not in ("revisit", "fresh") or self.tries[name] < MAX_TRIES:
+                continue
+            if vote.locked is not None and not vote.recheck:
+                continue
+            self.chase[name] = "done"
+            vote.recheck = False
+            vote.ready = False
+
+    def _note_arrival(self, pose: CarPose) -> None:
+        if self.last_pose is None:
+            return
+        for name in list(self.goal):
+            final_x, final_y, stage = self.goal[name]
+            if math.hypot(pose.x - final_x, pose.y - final_y) > ARRIVE_M:
+                continue
+            self.used[name].append((self.last_pose.x, self.last_pose.y))
+            self.chase[name] = stage
+            self.goal.pop(name)
+
+    def _remember_goal(self, action) -> None:
+        if action is None or action.kind != "move" or action.chase_to is None:
+            return
+        if action.final_x is None or action.final_y is None:
+            return
+        for name in action.cells:
+            self.goal[name] = (float(action.final_x), float(action.final_y), action.chase_to)
+
+    def _note_aim(self) -> None:
+        if self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
+            return
+        self._abandon()
+        action = self._plan(True)
         self._sync_attempt(action)
+        self._remember_goal(action)
+        if action is not None and action.cell is not None and self.votes[action.cell].recheck:
+            # 只有已经对上这个视角、停下来看的时候，才把新结论往上计。
+            self.votes[action.cell].ready = action.kind == "wait" and self.tries[action.cell] < MAX_TRIES
         if action is None or action.kind != "wait" or action.cell is None:
             return
         if self.views[action.cell].conclusion is not None:
@@ -257,6 +321,7 @@ class FieldWatch:
         if self.barren[action.cell] < 30:
             return
         self.tries[action.cell] = min(MAX_TRIES, self.tries[action.cell] + 1)
+        self.votes[action.cell].ready = False
         self.barren[action.cell] = 0
 
     def _arrived(self, hold) -> bool:
@@ -282,5 +347,6 @@ class FieldWatch:
         if self.hold is not None and not self._arrived(self.hold):
             return self.hold.text
         self.hold = action
+        self._remember_goal(action)
         return action.text
 
