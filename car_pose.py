@@ -1,8 +1,4 @@
-"""小车中心的车位换成相机光心。
-
-雷达话题给出的是中心的 x、y 和航向。场地表以右前角为原点。
-两者差一段安装尺寸，没量之前不投影。
-"""
+"""定位输入为小车右前角；相机安装偏移随车身航向旋转。"""
 
 from __future__ import annotations
 
@@ -12,8 +8,11 @@ import numpy as np
 import yaml
 
 
-# 光心相对右前角：左侧 0.211 m，前方 0.05 m，上方 0.70 m。
-OPTICAL_FROM_CORNER = np.array([-0.211, 0.05, 0.70], dtype=float)
+# 光心相对右前角：左侧 0.211 m，前方 0.05 m，上方 0.669 m。
+BODY_SIDE_M = 0.35
+BODY_HALF_M = BODY_SIDE_M / 2.0
+CAMERA_HEIGHT_M = 0.669
+OPTICAL_FROM_CORNER = np.array([-0.211, 0.05, CAMERA_HEIGHT_M], dtype=float)
 
 # 静止时大约 1 cm 的抖动不重新计票。超过 2 cm 或 1 度才当成车被推过。
 JITTER_M = 0.02
@@ -49,7 +48,7 @@ class Setup:
 
     @property
     def ready(self) -> bool:
-        # 基础用摆好的右前角，不看雷达。拓展要确认对齐，并且安装尺寸已经量过。
+        # 基础用摆好的右前角；拓展确认右前角定位与场地对齐。
         if self.origin_basic:
             return self.center_to_corner is not None
         return bool(self.aligned) and self.center_to_corner is not None
@@ -76,8 +75,6 @@ def load_setup(path: str) -> Setup:
         corner = None
     else:
         corner = np.array([float(offset[0]), float(offset[1])], dtype=float)
-        if float(np.linalg.norm(corner)) < 1e-6:
-            corner = None
     return Setup(
         aligned=bool(raw.get("aligned", False)),
         center_to_corner=corner,
@@ -113,10 +110,11 @@ def yaw_to_rad(yaw: float, unit: str) -> float:
     return float(yaw)
 
 
-def closest_pose(samples: list[CarPose], stamp: float) -> CarPose | None:
+def closest_pose(samples: list[CarPose], stamp: float, max_delta: float = 0.15) -> CarPose | None:
     if not samples:
         return None
-    return min(samples, key=lambda pose: abs(pose.stamp - stamp))
+    match = min(samples, key=lambda pose: abs(pose.stamp - stamp))
+    return match if abs(match.stamp - stamp) <= max_delta else None
 
 
 def pose_moved(previous: CarPose | None, current: CarPose) -> bool:
@@ -146,29 +144,25 @@ def _axes(yaw: float, pitch_deg: float, roll_deg: float = 0.0) -> tuple[np.ndarr
 
 
 def camera_position(pose: CarPose, center_to_corner: np.ndarray, pitch_deg: float) -> np.ndarray:
-    # 雷达原点是起步时的小车中心。场地原点是起步时的右前角。
-    # 起步、航向为 0 时，光心要落在右前角坐标系里的安装位置上。
-    center = np.array([pose.x, pose.y, 0.0], dtype=float) - np.array(
-        [center_to_corner[0], center_to_corner[1], 0.0], dtype=float
-    )
+    # 保留 offset 参数以兼容调用方；定位点已是右前角，不再做中心补偿。
     yaw_c, yaw_s = float(np.cos(pose.yaw)), float(np.sin(pose.yaw))
-    body = np.array(
-        [
-            center_to_corner[0] + OPTICAL_FROM_CORNER[0],
-            center_to_corner[1] + OPTICAL_FROM_CORNER[1],
-            OPTICAL_FROM_CORNER[2],
-        ],
-        dtype=float,
-    )
-    rotated = np.array(
-        [
-            yaw_c * body[0] - yaw_s * body[1],
-            yaw_s * body[0] + yaw_c * body[1],
-            body[2],
-        ],
-        dtype=float,
-    )
-    return center + rotated
+    dx, dy, dz = OPTICAL_FROM_CORNER
+    return np.array([pose.x + yaw_c * dx - yaw_s * dy,
+                     pose.y + yaw_s * dx + yaw_c * dy, dz], dtype=float)
+
+
+def body_center(pose: CarPose) -> tuple[float, float]:
+    c, s = float(np.cos(pose.yaw)), float(np.sin(pose.yaw))
+    return (pose.x - BODY_HALF_M * (c - s),
+            pose.y - BODY_HALF_M * (s + c))
+
+
+def turned_pose(pose: CarPose, yaw: float) -> CarPose:
+    """绕车身几何中心原地转动；定位角点会随之移动。"""
+    x, y = body_center(pose)
+    c, s = float(np.cos(yaw)), float(np.sin(yaw))
+    return CarPose(x + BODY_HALF_M * (c - s),
+                   y + BODY_HALF_M * (s + c), yaw, pose.stamp)
 
 
 def camera_frame(
@@ -212,11 +206,6 @@ def _gravity_down(gravity: np.ndarray | None) -> np.ndarray | None:
     if not np.isfinite(norm) or norm < 1e-6:
         return None
     return down / norm
-
-
-def pitch_from_start(base_deg: float, first_deg: float, measured_deg: float) -> float:
-    # 一开始的框用 base。第一次读数只记下，不挪框。之后变多少度，框就跟着变多少。
-    return float(base_deg) + (float(measured_deg) - float(first_deg))
 
 
 def pitch_from_gravity(gravity: np.ndarray | None) -> float | None:

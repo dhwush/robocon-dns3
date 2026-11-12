@@ -117,7 +117,7 @@ def test_start_camera_stays_on_the_known_optical_center():
     place = camera_position(START, OFFSET, 0.0)
     assert abs(place[0] + 0.211) < 1e-6
     assert abs(place[1] - 0.05) < 1e-6
-    assert abs(place[2] - 0.70) < 1e-6
+    assert abs(place[2] - 0.669) < 1e-6
 
 
 def _basic():
@@ -181,7 +181,58 @@ def test_wider_white_face_still_counts_until_two_boxes():
     color = _blank()
     _paint(color, pose, 0.0, cell, 0.70, 0.35, 0.0, (255, 255, 255), offset=offset)
     views = inspect_frame(pose, offset, 0.0, INTR, color, None)
-    assert views[cell.name].conclusion == "0"
+    assert views[cell.name].conclusion is None
+
+
+def test_yellow_floor_stays_out_of_the_white_box():
+    # 黄地面色相大约 16、饱和度大约 49。白盒正面饱和度大约 19。地板铺满时白盒仍按一层写。
+    _, pose, offset = _basic()
+    cell = _cell("右侧地面远一格")
+    floor = (109, 123, 135)
+    warm = (118, 125, 128)
+    from report import plain_state
+    from view_field import mark_text
+
+    color = np.full((INTR.height, INTR.width, 3), floor, dtype=np.uint8)
+    views = inspect_frame(pose, offset, 0.0, INTR, color, None)
+    assert views[cell.name].conclusion is None
+    assert views[cell.name].method is None
+    _paint(color, pose, 0.0, cell, 0.35, 0.35, 0.0, warm, offset=offset)
+    views = inspect_frame(pose, offset, 0.0, INTR, color, None)
+    assert views[cell.name].conclusion == "1"
+    assert views[cell.name].method == "黄地"
+    assert mark_text("6", "1", views[cell.name].method) == "6 一层·黄地"
+    assert plain_state(views[cell.name], None, "extend").endswith("，黄地")
+
+
+def test_far_notch_uses_size_without_straight_edges():
+    # 超过 3 m 的黑缝把轮廓咬开。近处仍不写，远处按整块宽高写成两层。
+    from classify import _block_shaped
+
+    def _notch(color, pose, offset, cell):
+        _paint(color, pose, 0.0, cell, 0.35, 0.70, 0.0, (255, 255, 255), offset=offset)
+        white = np.all(color == 255, axis=2)
+        ys, xs = np.nonzero(white)
+        x0, x1 = int(xs.min()), int(xs.max())
+        y0, y1 = int(ys.min()), int(ys.max())
+        depth = max(4, int(0.45 * (x1 - x0)))
+        thick = max(3, int(0.06 * (y1 - y0)))
+        for frac in (0.25, 0.50, 0.75):
+            top = y0 + int((y1 - y0) * frac)
+            color[top : top + thick, x0 : x0 + depth] = 0
+        assert not _block_shaped(np.all(color == 255, axis=2))
+
+    _, pose, offset = _basic()
+    near = _cell("最近一行右侧")
+    color = _blank()
+    _notch(color, pose, offset, near)
+    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[near.name].conclusion is None
+    far = _cell("右侧地面远一格")
+    color = _blank()
+    _notch(color, pose, offset, far)
+    view = inspect_frame(pose, offset, 0.0, INTR, color, None)[far.name]
+    assert view.conclusion == "2"
+    assert view.method == "远处"
 
 
 def test_near_white_is_one_and_outside_white_is_ignored():
@@ -224,7 +275,7 @@ def test_near_platform_stays_readable_when_the_base_drops_out():
     assert capped.conclusion == "红"
     assert capped.method == "彩色"
     blank = inspect_frame(pose, offset, 0.0, INTR, _blank(), None)
-    assert blank[cell.name].conclusion == "0"
+    assert blank[cell.name].conclusion is None
     assert blank["第三行左侧"].in_view and blank["右侧地面远一格"].in_view
     for name in ("最近左侧地面", "最近一行左侧", "最近右侧地面"):
         assert blank[name].needs_yaw
@@ -351,7 +402,7 @@ def test_curved_white_stays_unknown_and_a_straight_block_still_counts():
     color = _blank()
     _paint(color, pose, 0.0, cell, 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
     assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "1"
-    assert inspect_frame(pose, offset, 0.0, INTR, _blank(), None)[cell.name].conclusion == "0"
+    assert inspect_frame(pose, offset, 0.0, INTR, _blank(), None)[cell.name].conclusion is None
     color = _blank()
     _paint_hex(color, pose, 0.0, cell, 0.35, offset=offset)
     assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "1"
@@ -436,6 +487,74 @@ def _fill_face(color, depth, pose, offset, pitch, cell, z0, z_top, x_half=0.16):
     depth[ys[ok], xs[ok]] = measured[ok].astype(np.float32)
 
 
+def _fill_plane(color, depth, pose, offset, pitch, y_face, z0, z_top, bgr, x_center, x_half=0.16):
+    # 在指定的竖直面上铺一块颜色，并写下这个平面的深度。用来放挡在塔前面的箱子。
+    import cv2
+
+    from car_pose import camera_frame, project
+
+    origin, right, down, ahead = camera_frame(pose, offset, pitch)
+    pixels = []
+    for x in (x_center - x_half, x_center + x_half):
+        for z in (z0, z_top):
+            pixel = project(np.array([x, y_face, z]), pose, offset, pitch, INTR)
+            if pixel is not None:
+                pixels.append(pixel)
+    assert len(pixels) >= 3
+    hull = cv2.convexHull(np.round(np.stack(pixels)).astype(np.int32))
+    cv2.fillConvexPoly(color, hull, bgr)
+    picked = np.all(color == bgr, axis=2)
+    ys, xs = np.nonzero(picked)
+    denom = ((xs - INTR.cx) / INTR.fx) * right[1] + ((ys - INTR.cy) / INTR.fy) * down[1] + ahead[1]
+    measured = (y_face - origin[1]) / denom
+    cam_x = (xs - INTR.cx) * measured / INTR.fx
+    cam_y = (ys - INTR.cy) * measured / INTR.fy
+    world = origin + cam_x[:, None] * right + cam_y[:, None] * down + measured[:, None] * ahead
+    ok = (measured >= 0.3) & (measured <= 3.0) & (np.abs(denom) > 1e-6)
+    ok &= np.abs(world[:, 1] - y_face) < 0.05
+    ok &= (world[:, 2] >= z0 - 0.02) & (world[:, 2] <= z_top + 0.02)
+    depth[ys[ok], xs[ok]] = measured[ok].astype(np.float32)
+
+
+def test_box_in_front_of_the_tower_is_not_a_layer():
+    from car_pose import Setup
+    from report import FieldWatch
+
+    cell = _cell("最近右侧地面")
+    pose = _pose_for_camera(cell.x, cell.y - 1.3, 0.0, OFFSET)
+    pitch = -8.0
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_face(color, depth, pose, OFFSET, pitch, cell, 0.02, 0.35)
+    tower = inspect_frame(pose, OFFSET, pitch, INTR, color, depth)[cell.name]
+    assert tower.conclusion == "1"
+    assert tower.skip_vote is False
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_plane(color, depth, pose, OFFSET, pitch, cell.y - 0.75, 0.05, 0.45, (255, 255, 255), cell.x)
+    view = inspect_frame(pose, OFFSET, pitch, INTR, color, depth)[cell.name]
+    assert view.conclusion is None
+    assert view.skip_vote
+    assert view.blocked is False
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_plane(color, depth, pose, OFFSET, pitch, cell.y - 0.16, 0.10, 0.45, (40, 70, 120), cell.x, 0.18)
+    piled = inspect_frame(pose, OFFSET, pitch, INTR, color, depth)[cell.name]
+    assert piled.conclusion is None
+    assert piled.skip_vote
+    watch = FieldWatch(Setup(True, OFFSET, pitch, "", "rad"), INTR)
+    face = _blank()
+    face_depth = np.full(face.shape[:2], np.nan, dtype=np.float32)
+    _fill_face(face, face_depth, pose, OFFSET, pitch, cell, 0.02, 0.35)
+    for _ in range(10):
+        watch.update(pose, face, face_depth)
+    assert watch.votes[cell.name].count == 5
+    watch.update(pose, color, depth)
+    assert watch.votes[cell.name].count == 5
+    assert watch.votes[cell.name].locked is None
+    assert "前面有东西挡住了" in "\n".join(watch.window_lines("extend"))
+
+
 def test_depth_outside_range_does_not_cancel_color():
     _, pose, offset = _basic()
     cell = _cell("右侧地面远一格")
@@ -465,6 +584,43 @@ def test_close_face_uses_depth_and_names_it():
     assert found[cell.name].conclusion == "1"
     assert found[cell.name].method == "深度"
     assert mark_text("5", found[cell.name].conclusion, found[cell.name].method) == "5 一层·深度"
+
+
+def _drop_depth_above(depth, pose, offset, pitch, z_max):
+    from car_pose import camera_frame
+
+    origin, right, down, ahead = camera_frame(pose, offset, pitch)
+    ys, xs = np.nonzero(np.isfinite(depth))
+    values = depth[ys, xs].astype(np.float64)
+    cam_x = (xs - INTR.cx) * values / INTR.fx
+    cam_y = (ys - INTR.cy) * values / INTR.fy
+    world = origin + cam_x[:, None] * right + cam_y[:, None] * down + values[:, None] * ahead
+    drop = world[:, 2] > z_max
+    depth[ys[drop], xs[drop]] = np.nan
+
+
+def test_missing_top_depth_on_a_near_two_layer_still_counts():
+    # 顶面没有深度时，最高一截会停在一层和两层的容差中间，或只量到下层。仍写两层。
+    _, pose, offset = _basic()
+    cell = _cell("最近一行右侧")
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_face(color, depth, pose, offset, 0.0, cell, 0.20, 0.70)
+    gap = inspect_frame(pose, offset, 0.0, INTR, color, depth)[cell.name]
+    assert gap.conclusion is None
+    assert gap.method is None
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_face(color, depth, pose, offset, 0.0, cell, 0.20, 0.90)
+    _drop_depth_above(depth, pose, offset, 0.0, 0.60)
+    lifted = inspect_frame(pose, offset, 0.0, INTR, color, depth)[cell.name]
+    assert lifted.conclusion == "2"
+    assert lifted.method == "深度"
+    color = _blank()
+    depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
+    _fill_face(color, depth, pose, offset, 0.0, cell, 0.20, 0.55)
+    one = inspect_frame(pose, offset, 0.0, INTR, color, depth)[cell.name]
+    assert one.conclusion == "1"
 
 
 def test_jagged_face_still_uses_depth_when_the_top_matches():
@@ -543,7 +699,7 @@ def test_depth_lock_stays_out_of_the_judge_line():
     depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
     _fill_face(color, depth, pose, OFFSET, pitch, cell, 0.02, 0.35)
     watch = FieldWatch(Setup(True, OFFSET, pitch, "", "rad"), INTR)
-    for _ in range(LOCK_FRAMES - 1):
+    for _ in range(LOCK_FRAMES + 4):
         watch.update(pose, color, depth)
     assert watch.votes[cell.name].locked is None
     watch.update(pose, color, depth)
@@ -568,9 +724,11 @@ def test_narrow_white_stays_unknown_and_does_not_keep_a_wrong_empty():
         color[y0 : y0 + height, center - gap // 2 : center + gap // 2 + 1] = 0
     assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion is None
     watch = FieldWatch(setup, INTR)
-    for _ in range(LOCK_FRAMES):
+    for _ in range(LOCK_FRAMES + 5):
         watch.update(pose, _blank())
-    assert watch.votes[cell.name].locked == "0"
+    assert watch.votes[cell.name].locked is None
+    # 模拟此前由有效空台面证据锁定的旧状态，检查冲突重看。
+    watch.votes[cell.name].locked = "0"
     one = _blank()
     _paint(one, pose, 0.0, cell, 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
     for _ in range(LOCK_FRAMES - 1):
@@ -582,7 +740,7 @@ def test_narrow_white_stays_unknown_and_does_not_keep_a_wrong_empty():
     assert vote.locked == "0"
     assert vote.recheck
     vote.ready = True
-    for _ in range(LOCK_FRAMES):
+    for _ in range(LOCK_FRAMES + 5):
         vote.see("1")
     assert vote.locked == "1"
     assert vote.recheck is False
@@ -600,7 +758,7 @@ def test_frames_lock_and_one_frame_does_not_unlock():
     watch = FieldWatch(setup, INTR)
     color = _blank()
     _paint(color, pose, 0.0, _cell("右侧地面远一格"), 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
-    for _ in range(LOCK_FRAMES - 1):
+    for _ in range(LOCK_FRAMES + 4):
         watch.update(pose, color)
     assert watch.votes["右侧地面远一格"].locked is None
     watch.update(pose, color)
@@ -614,7 +772,7 @@ def test_jitter_does_not_reset_the_count():
     watch = FieldWatch(setup, INTR)
     color = _blank()
     _paint(color, pose, 0.0, _cell("右侧地面远一格"), 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
-    for index in range(LOCK_FRAMES):
+    for index in range(LOCK_FRAMES + 5):
         shifted = CarPose(pose.x + 0.01 * (index % 2), pose.y, pose.yaw)
         assert pose_moved(pose, shifted) is False or index == 0
         watch.update(shifted, color)
@@ -654,7 +812,7 @@ def test_basic_field_at_origin_does_not_use_radar():
     assert abs(pose.yaw) < 1e-6
     assert abs(place[0] - (1.2 - 0.211)) < 1e-6
     assert abs(place[1] - 0.05) < 1e-6
-    assert abs(place[2] - 0.70) < 1e-6
+    assert abs(place[2] - 0.669) < 1e-6
     assert setup.topic == ""
     assert setup.aligned is False
     watch = FieldWatch(setup, INTR)
@@ -671,7 +829,7 @@ def test_basic_field_at_origin_does_not_use_radar():
         (255, 255, 255),
         offset=setup.center_to_corner,
     )
-    for _ in range(LOCK_FRAMES):
+    for _ in range(LOCK_FRAMES + 5):
         watch.update(pose, color)
     lines = watch.lines("basic")
     assert "右侧地面远一格 1" in lines
@@ -695,8 +853,8 @@ def test_basic_and_extend_commands_print_different_lines():
     assert "向左" not in basic and "向右" not in basic
     assert "抬头" not in basic and "低头" not in basic
     assert len(extend) == 7
-    # 1 号已经在画面正中，先把俯仰对准一层顶和塔顶的中点，再去转别的格。
-    assert extend[-1].startswith("低头到")
+    # 定位改为右前角后，此场景先向右转，对准下一格。
+    assert extend[-1] == "向右转 35 度"
     assert "度" in extend[-1]
     assert "还没看清" in "\n".join(extend)
 
@@ -797,7 +955,7 @@ def test_blocked_cell_asks_for_one_slide_when_the_view_is_open():
 def test_visible_cells_lock_before_the_slide():
     watch = FieldWatch(_setup(), INTR)
     color = _blank()
-    for _ in range(LOCK_FRAMES - 1):
+    for _ in range(LOCK_FRAMES + 4):
         watch.update(START, color)
     assert all(not line.endswith("米") for line in watch.lines("extend"))
     watch.update(START, color)
@@ -824,7 +982,7 @@ def test_all_locked_says_stop():
     color = _blank()
     near = _cell("右侧地面远一格")
     _paint(color, pose, 0.0, near, 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
-    for _ in range(LOCK_FRAMES):
+    for _ in range(LOCK_FRAMES + 5):
         watch.update(pose, color)
     for name, vote in watch.votes.items():
         if vote.locked is None:
@@ -866,7 +1024,7 @@ def test_window_explains_the_tower_and_keeps_a_chosen_light():
     seen = inspect_frame(pose, setup.center_to_corner, 0.0, INTR, color, None)
     assert seen["右侧地面远一格"].region is not None
     assert seen["右侧地面远一格"].piece is not None
-    for _ in range(LOCK_FRAMES):
+    for _ in range(LOCK_FRAMES + 5):
         watch.update(pose, color)
     text = "\n".join(watch.window_lines("basic"))
     assert "6：一层白盒" in text
@@ -1088,7 +1246,9 @@ def test_blocked_cell_moves_to_a_clear_landing():
     cam = camera_position(landed, OFFSET, 0.0)
     assert not _ground_blocked(float(cam[0]), float(cam[1]))
     assert not _ground_blocked(landed.x, landed.y)
-    assert fits_when_aimed(_cell(six), landed, OFFSET, INTR)
+    # action.x/y 可能是绕障折点；最终观察点必须能看清。
+    final = CarPose(action.final_x, action.final_y, pose.yaw)
+    assert fits_when_aimed(_cell(six), final, OFFSET, INTR)
     # 身后的格子按真实转角转，不再被夹成 90 度。
     behind = CarPose(0.0, 0.0, np.pi)
     assert abs(bearing_deg(_cell(six).center(0.35), behind, OFFSET)) > 90.0
@@ -1098,15 +1258,15 @@ def test_too_close_to_fit_asks_for_a_move():
     from classify import inspect_frame
     from motion import plan_action
 
-    # 光心离 4 号大约 0.6 m，一层顶到塔顶装不进彩色的垂直视场。
+    # 旧点位虽未压到台，35 cm 车身的旋转包络已碰台，必须保持原位。
     pose = CarPose(1.185 + 0.211 - 0.25, 1.454 - 0.25 - 0.5 - 0.05 + 0.15, 0.0)
     views = inspect_frame(pose, OFFSET, 0.0, INTR, None)
     names = [cell.name for cell in tower_cells()]
     locked = {name: "0" for name in names}
     locked["最近一行右侧"] = None
     action = plan_action(views, locked, pose, OFFSET, 0.0, True, INTR)
-    assert action is not None and action.kind == "move"
-    assert "平移" in action.text
+    assert action is not None and action.kind == "blocked"
+    assert "保持原位" in action.text
 
 
 def test_command_stays_until_the_move_is_finished():
@@ -1172,7 +1332,7 @@ def test_map_click_lands_on_the_optical_center():
     yaw = np.deg2rad(30.0)
     pose = pose_for_optical(1.2, 0.4, yaw)
     optical = camera_position(pose, np.zeros(2), 0.0)
-    assert np.allclose(optical, [1.2, 0.4, 0.70])
+    assert np.allclose(optical, [1.2, 0.4, 0.669])
     straight = pose_for_optical(0.5, 1.0, 0.0)
     assert np.allclose([straight.x, straight.y], [0.5 + 0.211, 1.0 - 0.05])
 
@@ -1202,29 +1362,33 @@ def test_live_pitch_reads_look_up_as_positive():
     assert live_pitch_line(12.34) == "俯仰 抬头 12.3 度"
     assert live_pitch_line(-3.0) == "俯仰 低头 3.0 度"
     assert live_pitch_line(0.0) == "俯仰 0.0 度"
+    from report import required_pitch_line, window_pitch_lines
+
+    assert required_pitch_line(None) is None
+    assert required_pitch_line(12.0) == "要求 抬头到 12 度"
+    assert required_pitch_line(-6.0) == "要求 低头到 6 度"
+    assert window_pitch_lines(-6.0, 2.0) == ["俯仰 低头 6.0 度", "要求 抬头到 2 度"]
+    assert window_pitch_lines(None, None) == ["俯仰读不出来"]
 
 
 def test_search_box_follows_pitch_change_and_keeps_the_tower():
-    from car_pose import pitch_from_start, project
+    from car_pose import project
     from classify import _mask
 
-    assert pitch_from_start(0.0, -5.0, -5.0) == 0.0
-    assert abs(pitch_from_start(0.0, -5.0, 10.0) - 15.0) < 1e-9
-    assert abs(pitch_from_start(-8.0, -3.0, -13.0) + 18.0) < 1e-9
     setup, pose, offset = _basic()
     watch = FieldWatch(setup, INTR)
     watch.pitch = -8.0
     watch.follow_pitch(None)
     assert watch.pitch == -8.0
     watch.follow_pitch(-3.0)
-    assert watch.pitch == -8.0
+    assert watch.pitch == -3.0
     watch.follow_pitch(-13.0)
-    assert abs(watch.pitch + 18.0) < 1e-9
+    assert watch.pitch == -13.0
     watch.follow_pitch(None)
-    assert abs(watch.pitch + 18.0) < 1e-9
+    assert watch.pitch == -13.0
     cell = _cell("右侧地面远一格")
     base = 0.0
-    used = pitch_from_start(base, -4.0, 6.0)
+    used = 10.0
 
     def center_in(pitch: float) -> tuple[float, bool]:
         mask = _mask(cell, pose, offset, pitch, INTR)

@@ -4,15 +4,17 @@ python map_test.py
 
 点下去的是相机光心在地面上的位置。点下去就画出从这里看完六格的最短路线。
 再点路线上的圆点，当作车已经到了这一点，光心改到这一站的坐标，窗口列出朝向和俯仰。
-航向在这个窗口里输入，单位是度，正数向左转。没输入时按正前方。改起步光心的航向才重画路线。
-点住某一站之后，航向直接用这一站已经算好的角度，再点同一站换下一格。路线不动。回车就在这一站的坐标打开相机，退格仍可改数字。刚打开时俯仰用 config/field.yaml 里的角度。第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。光心高度仍是 0.70 m。
+航向在这个窗口里输入，单位是度，正数向左转。没输入时按正前方。改变航向只更新当前朝向，不重新规划路线；选择新的起步光心位置才重画路线。
+点住某一站之后，航向直接用这一站已经算好的角度，再点同一站换下一格。路线不动。回车就在这一站的坐标打开相机，退格仍可改数字。刚打开时俯仰用 config/field.yaml 里的角度。第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。光心高度为 0.669 m（66.9 cm）。
 摄像头窗口最上面写框正在用的俯仰。
 关掉相机窗口后回到平面图，刚才的路线还在。再点一个新的光心才换路线。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -41,7 +43,7 @@ _COLORS = {
 
 
 def pose_for_optical(x: float, y: float, yaw: float) -> CarPose:
-    # 安装差按 0 处理，位姿数字不再代表右前角。反推出来的车位要让光心落在点的位置上。
+    # 由光心反推右前角定位点，安装偏移随航向旋转。
     yaw_c, yaw_s = float(np.cos(yaw)), float(np.sin(yaw))
     body = OPTICAL_FROM_CORNER
     rotated = np.array(
@@ -121,7 +123,16 @@ def open_yaw(yaw_text: str) -> float | None:
     return _yaw_from_text(yaw_text)
 
 
-def stop_lines(stops: list, index: int, chosen: int = 0) -> list[str]:
+def select_route_stop(view: dict, stops: list, index: int, current_yaw: float) -> None:
+    """保存点击前的航向，目标航向更新后仍能显示本次需要转的角度。"""
+    view["look"] = int(view["look"]) + 1 if view.get("pinned") and view.get("arrived") == index else 0
+    view["arrived"] = index
+    view["pinned"] = True
+    view["arrival_yaw"] = current_yaw
+    view["auto_yaw"] = look_yaw_text(stops, index, int(view["look"]))
+
+
+def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | None = None) -> list[str]:
     stop = stops[index]
     lines = [f"停 {index + 1} / {len(stops)}  已到达"]
     if not stop.looks:
@@ -132,6 +143,14 @@ def stop_lines(stops: list, index: int, chosen: int = 0) -> list[str]:
         lines.append(
             f"{look.number}  朝向 {side} {abs(look.yaw_deg):.0f} 度   {format_pitch(look.pitch_deg)}{current}"
         )
+    if arrival_yaw is not None and stop.looks:
+        look = stop.looks[chosen % len(stop.looks)]
+        turn = (look.yaw_deg - math.degrees(arrival_yaw) + 180.0) % 360.0 - 180.0
+        if abs(turn) < 0.5:
+            lines.append(f"看 {look.number}  航向已对准，无需旋转")
+        else:
+            side = "向左" if turn > 0 else "向右"
+            lines.append(f"看 {look.number}  需{side}转 {abs(turn):.0f} 度（相对点击前航向）")
     lines.append("完成识别")
     seen = {look.number for item in stops for look in item.looks}
     if index == len(stops) - 1 and seen >= set("123456"):
@@ -413,7 +432,7 @@ def _draw_map(
     else:
         hint = "点路线上的圆点，光心和航向改到这一站算出的角度。再点同一站换下一格。回车打开相机。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
-    text_y = 56
+    text_y = 84
     for row in arrived_lines or []:
         draw.text((8, text_y), row, font=font, fill=(255, 210, 120))
         text_y += 20
@@ -426,7 +445,7 @@ def _draw_map(
     if hover is not None:
         hx, hy = hover
         label = _cursor_text(hx, hy)
-        draw.text((8, 30), label, font=font, fill=(255, 220, 80))
+        draw.text((560, 34), label, font=font, fill=(255, 220, 80))
         _cell, _distance, near = nearest_green_block(hx, hy)
         u, v = _pixel(hx, hy)
         draw.line((u, v, *_pixel(*near)), fill=(255, 220, 80), width=1)
@@ -438,20 +457,64 @@ def _draw_map(
     return board
 
 
-def _open_camera(x: float, y: float, yaw: float, pitch: float) -> None:
+def _open_camera(x: float, y: float, yaw: float, pitch: float, args=None) -> None:
     pose = pose_for_optical(x, y, yaw)
     offset = np.zeros(2, dtype=float)
     optical = camera_position(pose, offset, pitch)
-    print(f"光心 x={optical[0]:.3f} m  y={optical[1]:.3f} m  高 {optical[2]:.2f} m  航向 {np.degrees(yaw):.1f} 度")
+    print(f"光心 x={optical[0]:.3f} m  y={optical[1]:.3f} m  高 {optical[2]:.3f} m  航向 {np.degrees(yaw):.1f} 度")
     setup = Setup(False, offset, pitch, "", "rad", origin_basic=True)
     watch = FieldWatch(setup, load_intrinsics(str(ROOT / "config" / "intrinsics.yaml")))
     watch.pitch = pitch
-    _live(SimpleNamespace(mode="extend"), watch, pose)
+    args = args or SimpleNamespace(mode="extend", pose_source="ssh")
+    if args.pose_source in ("ssh", "local"):
+        measured = load_setup(str(ROOT / "config" / "field.yaml"))
+        # 此入口按用户约定：CAN 已是场地右前角位姿，无中心补偿。
+        measured = replace(measured, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
+        watch = FieldWatch(measured, watch.intr)
+        watch.pitch = pitch
+    _live(args, watch, pose)
+
+
+def route_position_key(marker):
+    """路线只在起步光心的位置改变时重算，转头不会改变既定观察任务。"""
+    return None if marker is None else (round(marker[0], 4), round(marker[1], 4))
+
+
+MODE_BUTTONS = (("static", "手动离线"), ("ssh", "笔记本 SSH"), ("local", "主机 CAN"))
+
+
+def mode_at(u, v):
+    if 32 <= v <= 58:
+        for index, (source, _) in enumerate(MODE_BUTTONS):
+            if 8 + index * 180 <= u < 180 + index * 180:
+                return source
+    return None
+
+
+def paint_modes(board, source):
+    from PIL import Image, ImageDraw, ImageFont
+    import cv2
+    panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(panel)
+    font = ImageFont.truetype(_FONT, 16)
+    for index, (value, label) in enumerate(MODE_BUTTONS):
+        left = 8 + index * 180
+        draw.rectangle((left, 32, left + 172, 58), fill=(30, 110, 70) if value == source else (60, 60, 60))
+        draw.text((left + 8, 34), label, font=font, fill="white")
+    return cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
 
 
 def main() -> None:
     import cv2
 
+    import argparse
+    parser = argparse.ArgumentParser(description="地图与实时 CAN 相机测试")
+    parser.add_argument("--pose-source", choices=("ssh", "local", "static"), default="static")
+    parser.add_argument("--verify-motion", action="store_true", help="慢速移动验证识别框，CAN 直接作为右前角场地位姿")
+    parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
+    parser.add_argument("--can-interface", default="can0")
+    args = parser.parse_args()
+    args.mode = "extend"
     pitch = load_setup(str(ROOT / "config" / "field.yaml")).pitch_deg
     intrinsics = load_intrinsics(str(ROOT / "config" / "intrinsics.yaml"))
     picked: dict[str, tuple[float, float] | None] = {"xy": None}
@@ -467,21 +530,20 @@ def main() -> None:
     route_points: list[tuple[float, float]] = []
 
     def on_mouse(event, u, v, _flags, _param) -> None:
+        if event == cv2.EVENT_LBUTTONDOWN:
+            source = mode_at(u, v)
+            if source is not None:
+                args.pose_source = source
+                return
+        if 32 <= v <= 58:
+            return
         xy = _snap_cursor(*_world(u, v))
         if event == cv2.EVENT_MOUSEMOVE:
             hover["xy"] = xy
         elif event == cv2.EVENT_LBUTTONDOWN:
             arrived = hit_route(view["stops"], u, v)
             if arrived is not None:
-                if view["pinned"] and view["arrived"] == arrived:
-                    view["look"] = int(view["look"]) + 1
-                else:
-                    view["look"] = 0
-                view["arrived"] = arrived
-                view["pinned"] = True
-                text = look_yaw_text(route_stops, arrived, int(view["look"]))
-                if text is not None:
-                    view["auto_yaw"] = text
+                select_route_stop(view, route_stops, arrived, open_yaw(yaw_text) or 0.0)
                 return
             hit = _hit_used(used, u, v)
             if hit is not None:
@@ -510,10 +572,11 @@ def main() -> None:
             view["pinned"] = False
         yaw = _yaw_from_text(yaw_text) if marker is not None else None
         heading = 0.0 if yaw is None else yaw
-        key = None if marker is None else (round(marker[0], 4), round(marker[1], 4), round(heading, 5))
-        # 点住某一站之后，数字只改这一站的航向，不把路线和坐标重算掉。
+        key = route_position_key(marker)
+        # 航向是执行观察动作时的实际朝向，不能使已经规划的路线重新生成。
         if not view["pinned"] and key != route_key:
             route_key = key
+            view["look"] = 0
             view["arrived"] = 0 if key is not None else None
             if marker is None:
                 route_stops = []
@@ -534,14 +597,14 @@ def main() -> None:
         )
         lines = []
         if route_stops and isinstance(arrived, int) and 0 <= arrived < len(route_stops):
-            lines = stop_lines(route_stops, arrived, int(view["look"]) if view["pinned"] else 0)
+            lines = stop_lines(route_stops, arrived, int(view["look"]) if view["pinned"] else 0, view.get("arrival_yaw") if view["pinned"] else heading)
         if where is not None:
             lines.insert(0, f"光心  x {where[0]:+.3f} m  y {where[1]:+.3f} m  航向 {yaw_text or '0'}")
         shown = where if view["pinned"] else marker
         shown_yaw = open_yaw(yaw_text) if view["pinned"] else (heading if marker is not None else None)
         cv2.imshow(
             window,
-            _draw_map(
+            paint_modes(_draw_map(
                 shown,
                 shown_yaw,
                 pitch,
@@ -552,7 +615,7 @@ def main() -> None:
                 route_points,
                 arrived if isinstance(arrived, int) else None,
                 lines,
-            ),
+            ), args.pose_source),
         )
         action = _yaw_key(cv2.waitKeyEx(30))
         if marker is None:
@@ -570,7 +633,35 @@ def main() -> None:
             used = remember_point(used, where[0], where[1], yaw_text or "0")
             save_points(_POINTS_PATH, used)
             cv2.destroyWindow(window)
-            _open_camera(where[0], where[1], opening, pitch)
+            selected_pitch = pitch
+            target_lines = []
+            if isinstance(arrived, int) and 0 <= arrived < len(route_stops):
+                looks = route_stops[arrived].looks
+                if looks:
+                    selected_pitch = looks[int(view["look"]) % len(looks)].pitch_deg
+                target_lines = stop_lines(route_stops, arrived, int(view["look"]), view.get("arrival_yaw"))
+            # 固定计划与测试位姿分别传递，实时定位只移动地图标记。
+            args.fixed_target_lines = target_lines
+            live_heading = {"yaw": opening}
+            def select_live_target(event, u, v, _flags, _param):
+                if event != cv2.EVENT_LBUTTONDOWN:
+                    return
+                index = hit_route(route_points, u, v)
+                if index is None:
+                    return
+                select_route_stop(view, route_stops, index, live_heading["yaw"])
+                view["auto_yaw"] = None
+                args.fixed_target_lines = stop_lines(route_stops, index, int(view["look"]), live_heading["yaw"])
+            def live_map(current):
+                live_heading["yaw"] = current.yaw
+                optical = camera_position(current, np.zeros(2), 0)
+                status = [f"实时右前角 x={current.x:+.3f} y={current.y:+.3f} yaw={np.degrees(current.yaw):+.1f}°"]
+                cv2.imshow("route", _draw_map(tuple(optical[:2]), current.yaw, selected_pitch,
+                    route_line=route_line, route_stops=route_points,
+                    arrived=view["arrived"], arrived_lines=status + args.fixed_target_lines))
+                cv2.setMouseCallback("route", select_live_target)
+            args.live_map = live_map
+            _open_camera(where[0], where[1], opening, selected_pitch, args)
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
             cv2.setMouseCallback(window, on_mouse)
             continue

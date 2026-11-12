@@ -6,14 +6,16 @@ python view_field.py basic
 拓展：订阅雷达给的小车中心 x、y 和航向，再告诉裁判下一步。
 python view_field.py extend
 
+按 d 开关颜色/深度诊断，n 切换诊断塔，s 保存原始帧和诊断图到 debug_captures。
 打开画面后按 1 到 5 换光线：很亮、白天、室内、偏暗、很暗。按 q 或 Esc 退出。
-画面最上面写框正在用的俯仰，正数是抬头。刚打开用配置里的角度，
-第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。左右转先不改。
+画面最上面写加速度计的实时俯仰，正数是抬头，框用这个角度投影。
+读不到就沿用上一帧。下一行写这一步要求的俯仰。左右转先不改。
 """
 
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +31,7 @@ from car_pose import (
     yaw_to_rad,
 )
 from field_map import TOWER_NO
-from report import LEVEL_LOCK, FieldWatch, light_from_key, live_pitch_line
+from report import LEVEL_LOCK, FieldWatch, light_from_key, window_pitch_lines
 
 
 ROOT = Path(__file__).resolve().parent
@@ -206,6 +208,20 @@ def paint_window(color, views, locked: dict, texts: list[str]):
                 cv2.drawContours(board, [view.region], -1, bgr, 2, cv2.LINE_AA)
             if view.piece is not None:
                 cv2.drawContours(board, [view.piece], -1, bgr, 2, cv2.LINE_AA)
+            measure = getattr(view, "measurements", None) or {}
+            points = measure.get("top_pixels", [])
+            for x, y in points:
+                cv2.circle(
+                    board, (int(x), int(y)), 2, (255, 0, 255), -1
+                )
+            if points:
+                x, y = points[len(points)//2]
+                height = measure.get("depth_height_cm", 0)
+                tags.append((
+                    int(x)+6, max(0,int(y)-18),
+                    f"{TOWER_NO[name]} 深度取样 {height:.1f}cm",
+                    (255,0,255),
+                ))
             anchor = view.piece if view.piece is not None else view.region
             if anchor is None:
                 continue
@@ -250,7 +266,7 @@ def _gravity_from_accel(specific: np.ndarray, rotation: np.ndarray) -> np.ndarra
     # 加速度计静止时指向“上”。旋到彩色相机系后取反，得到相机系里的重力方向。
     up = rotation @ np.asarray(specific, dtype=float)
     norm = float(np.linalg.norm(up))
-    if not np.isfinite(norm) or norm <= 1.0:
+    if not np.isfinite(norm) or not 8.3 <= norm <= 11.3:
         return None
     return -up / norm
 
@@ -274,12 +290,13 @@ def _open_camera(rs):
     config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
     config.enable_stream(rs.stream.accel)
+    # 要求 SDK 提供与 ROS 系统时钟相同的全局时间；不使用设备启动时间冒充。
     align = rs.align(rs.stream.color)
     lock = threading.Lock()
     ready = threading.Event()
     scale = {"v": 0.001}
     accel = {"rotation": None, "gravity": None}
-    pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0}
+    pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0, "received": 0.0}
 
     def on_frame(frame) -> None:
         try:
@@ -304,13 +321,17 @@ def _open_camera(rs):
                 return
             color = np.asanyarray(color_frame.get_data()).copy()
             depth = np.asanyarray(depth_frame.get_data()).astype(np.float32) * scale["v"]
-            stamp = float(color_frame.get_timestamp()) * 1e-3
+            domain = color_frame.get_frame_timestamp_domain()
+            stamp = (float(color_frame.get_timestamp()) * 1e-3
+                     if domain in (rs.timestamp_domain.system_time, rs.timestamp_domain.global_time)
+                     else float("nan"))
             with lock:
                 gravity = None if accel["gravity"] is None else accel["gravity"].copy()
                 pending["color"] = color
                 pending["depth"] = depth
                 pending["gravity"] = gravity
                 pending["stamp"] = stamp
+                pending["received"] = time.monotonic()
             ready.set()
         except Exception:
             return
@@ -327,6 +348,9 @@ def _open_camera(rs):
         pipeline = rs.pipeline()
         config.disable_stream(rs.stream.accel)
         profile = pipeline.start(config, on_frame)
+    for device_sensor in profile.get_device().query_sensors():
+        if device_sensor.supports(rs.option.global_time_enabled):
+            device_sensor.set_option(rs.option.global_time_enabled, 1)
     scale["v"] = float(profile.get_device().first_depth_sensor().get_depth_scale())
     accel["rotation"] = _accel_rotation(profile, rs)
     sensor = profile.get_device().first_color_sensor()
@@ -343,10 +367,36 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         print("\n".join(lines))
         print("没有接上相机")
         return lines
+    source = getattr(args, "pose_source", "ssh")
+    verify_motion = getattr(args, "verify_motion", False)
+    if verify_motion and source in ("ssh", "local"):
+        from dataclasses import replace
+        # 验证模式明确采用 CAN 为场地右前角位姿，不附加中心偏移。
+        watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
+    if source in ("ssh", "local") and watch.setup.origin_basic:
+        setup = load_setup(str(ROOT / "config" / "field.yaml"))
+        if not setup.ready:
+            raise SystemExit("使用 CAN 前请在 config/field.yaml 确认右前角定位已对齐，并设置 aligned: true")
+        watch.setup = setup
     pipeline, sensor, ready, lock, pending = _open_camera(rs)
-    listener = _listen(watch.setup.topic, watch.setup.yaw_unit) if watch.setup.topic else None
+    source = getattr(args, "pose_source", "ssh")
+    can_stream = None
+    try:
+        if source in ("ssh", "local"):
+            from can_pose import CanPoseStream
+            can_stream = CanPoseStream(source, getattr(args, "can_interface", "can0"),
+                                       getattr(args, "ssh_host", "volleyball@192.168.3.194"))
+        listener = _listen(watch.setup.topic, watch.setup.yaw_unit) if source == "ros" and watch.setup.topic else None
+    except Exception:
+        pipeline.stop()
+        raise
     previous = ""
+    initial_can_pose = None
     light = watch.light
+    exposure_wait = 5
+    debug_visible = False
+    debug_selected = 0
+    from tower_debug import paint_diagnostics, save_capture
     try:
         _apply_light(sensor, rs, light)
         while True:
@@ -361,6 +411,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 depth = pending["depth"]
                 gravity = None if pending["gravity"] is None else pending["gravity"].copy()
                 stamp = float(pending["stamp"])
+                received = float(pending["received"])
             if color is None or depth is None:
                 continue
             measured = pitch_from_gravity(gravity)
@@ -369,36 +420,117 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if rolled is not None:
                 watch.roll = rolled
             current = pose
-            if listener is not None:
+            if can_stream is not None:
+                matched = can_stream.match(received)
+                if matched is None:
+                    for vote in watch.votes.values():
+                        vote.on_move()
+                    watch.stable_pose = None
+                    watch.views = None
+                    message = "等待 CAN 位姿 / 数据超时，暂停识别"
+                    cv2.imshow("建塔点", paint_window(color, None, {}, [message]))
+                    if previous != message:
+                        print(message)
+                        previous = message
+                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                        return []
+                    if can_stream.process.poll() is not None:
+                        raise RuntimeError("CAN 读取进程已退出，请检查 SSH 和 CAN 接口")
+                    continue
+                current = matched
+                if initial_can_pose is None:
+                    initial_can_pose = matched
+            elif listener is not None:
                 import rclpy
 
                 rclpy.spin_once(listener[0], timeout_sec=0.0)
                 matched = closest_pose(listener[1], stamp)
-                if matched is not None:
-                    current = matched
-            watch.update(current, color, depth)
+                if matched is None:
+                    for vote in watch.votes.values():
+                        vote.on_move()
+                    watch.stable_pose = None
+                    cv2.imshow("建塔点", color)
+                    print("车位与画面时间不匹配，暂停识别")
+                    key = cv2.waitKey(1) & 0xFF
+                    if key in (ord("q"), 27):
+                        return watch.lines(args.mode)
+                    continue
+                current = matched
+            elif not watch.setup.origin_basic:
+                print("没有实时车位，暂停识别")
+                return watch.lines(args.mode)
+            live_map = getattr(args, "live_map", None)
+            if live_map is not None:
+                live_map(current)
+            if exposure_wait > 0:
+                exposure_wait -= 1
+                watch.update(current, None, None)
+                for vote in watch.votes.values():
+                    vote.on_move()
+            else:
+                watch.update(current, color, depth)
             if watch.light != light:
                 light = watch.light
                 _apply_light(sensor, rs, light)
-            lines = watch.lines(args.mode)
-            shown = watch.window_lines(args.mode)
+                exposure_wait = 5
+            fixed_targets = getattr(args, "fixed_target_lines", [])
+            result_mode = "basic" if fixed_targets else args.mode
+            lines = watch.lines(result_mode)
+            shown = watch.window_lines(result_mode)
             text = "\n".join(shown)
             if text != previous:
                 print(text)
                 previous = text
             locked = {name: vote.locked for name, vote in watch.votes.items()}
-            painted = [live_pitch_line(None if measured is None else watch.pitch)] + shown
+            shown_pitch = None if measured is None else watch.pitch
+            fixed_targets = getattr(args, "fixed_target_lines", [])
+            painted = window_pitch_lines(shown_pitch, None if fixed_targets else watch.required_pitch()) + shown
+            if fixed_targets:
+                painted = window_pitch_lines(shown_pitch, None) + ["固定计划（目标角度保持）："] + fixed_targets + shown
+            painted.append(f"位姿 {source}: x={current.x:.3f} m y={current.y:.3f} m 旋转={np.degrees(current.yaw):.1f}°")
+            if verify_motion and initial_can_pose is not None:
+                dx = current.x - initial_can_pose.x
+                dy = current.y - initial_can_pose.y
+                turn = np.degrees(np.arctan2(np.sin(current.yaw - initial_can_pose.yaw),
+                                             np.cos(current.yaw - initial_can_pose.yaw)))
+                painted.append(f"慢速验证：Δx={dx:+.3f} m Δy={dy:+.3f} m Δyaw={turn:+.1f}°")
+                painted.append(f"CAN 接收年龄 {1000 * (time.monotonic() - current.stamp):.0f} ms；观察框是否保持贴合建塔点")
+            painted.append("d 颜色/深度诊断，n 切换塔，s 保存原始帧")
             cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted))
+            if debug_visible:
+                cv2.imshow("颜色与深度诊断", paint_diagnostics(color, depth, watch.views, debug_selected, locked))
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines
+            if key == ord("d"):
+                debug_visible = not debug_visible
+                if not debug_visible:
+                    cv2.destroyWindow("颜色与深度诊断")
+            elif key == ord("n"):
+                debug_selected = (debug_selected + 1) % len(watch.votes)
+            elif key == ord("s"):
+                try:
+                    saved = save_capture(ROOT / "debug_captures", color, depth,
+                                         watch.views, debug_selected, locked, {
+                        "stamp": stamp, "pose": vars(current),
+                        "pitch_deg": watch.pitch, "roll_deg": watch.roll,
+                        "intrinsics": vars(watch.intr),
+                        "center_to_corner": watch.setup.center_to_corner,
+                        "light": light, "exposure_wait": exposure_wait,
+                    })
+                    print(f"已保存诊断：{saved}.npz / .png")
+                except (OSError, ValueError) as error:
+                    print(f"保存诊断失败：{error}")
             picked = light_from_key(key)
             if picked is not None:
                 watch.choose_light(picked)
                 light = watch.light
                 _apply_light(sensor, rs, light)
+                exposure_wait = 5
     finally:
         pipeline.stop()
+        if can_stream is not None:
+            can_stream.close()
         cv2.destroyAllWindows()
         if listener is not None:
             listener[0].destroy_node()
@@ -437,12 +569,12 @@ def run_extend(args) -> list[str]:
     watch.pitch = setup.pitch_deg
     pose = _pose_from_args(args, setup.yaw_unit)
     if args.image or args.once:
-        if args.pose_is_default and setup.topic:
+        if getattr(args, "pose_source", "ssh") == "ros" and args.pose_is_default and setup.topic:
             listened = _subscribe(setup.topic, setup.yaw_unit)
             if listened is not None:
                 pose = listened
         return _once(args, watch, pose)
-    if args.pose_is_default and setup.topic:
+    if getattr(args, "pose_source", "ssh") == "ros" and args.pose_is_default and setup.topic:
         listened = _subscribe(setup.topic, setup.yaw_unit)
         if listened is not None:
             pose = listened
@@ -458,6 +590,10 @@ def run(args) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="识别四块建塔格的状态")
     parser.add_argument("mode", choices=("basic", "extend"))
+    parser.add_argument("--pose-source", choices=("ssh", "local", "ros", "static"), default="ssh")
+    parser.add_argument("--verify-motion", action="store_true", help="慢速验证：直接采用 CAN 右前角场地位姿并显示相对变化")
+    parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
+    parser.add_argument("--can-interface", default="can0")
     parser.add_argument("--image", default="")
     parser.add_argument("--pose", nargs=3, type=float, default=(0.0, 0.0, 0.0), metavar=("X", "Y", "YAW"))
     parser.add_argument("--pitch", type=float, default=None)

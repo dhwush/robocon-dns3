@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import math
 
-from car_pose import CarPose, Intrinsics, Setup, pitch_from_start, pose_moved
+from car_pose import CarPose, Intrinsics, Setup, pose_moved
 from classify import inspect_frame
 from field_map import DISPLAY, TOWER_NO
-from motion import ARRIVE_M, MAX_TRIES, place_done, plan_action
+from motion import MOVE_ARRIVE_M, ARRIVE_M, MAX_TRIES, format_pitch, place_done, plan_action
 from vote import Vote
 
 
@@ -55,6 +55,21 @@ def live_pitch_line(degrees: float | None) -> str:
     return "俯仰 0.0 度"
 
 
+def required_pitch_line(degrees: float | None) -> str | None:
+    # 这一步要转到的俯仰，写在实时俯仰下面。没有目标就不写。
+    if degrees is None:
+        return None
+    return f"要求 {format_pitch(float(degrees))}"
+
+
+def window_pitch_lines(current: float | None, required: float | None) -> list[str]:
+    rows = [live_pitch_line(current)]
+    asked = required_pitch_line(required)
+    if asked is not None:
+        rows.append(asked)
+    return rows
+
+
 def light_from_key(key: int) -> str | None:
     index = int(key) - ord("1")
     if 0 <= index < len(LEVELS):
@@ -73,6 +88,8 @@ def plain_state(view, locked: str | None, mode: str) -> str:
             text = STATE_WORDS[locked]
         elif view.blocked and not locked:
             text = "被挡住了，这一眼不写结论"
+        elif view.skip_vote and view.conclusion is None and not locked:
+            text = "前面有东西挡住了，还不能确定"
         else:
             text = "还没写下"
     elif locked:
@@ -83,13 +100,31 @@ def plain_state(view, locked: str | None, mode: str) -> str:
         text = "高度不在画面里，要改俯仰"
     elif view.blocked and view.conclusion is None:
         text = "被前面的台挡住了，还不能确定"
+    elif view.skip_vote and view.conclusion is None:
+        text = "前面有东西挡住了，还不能确定"
     elif view.conclusion is None:
         text = "还没看清"
     else:
         text = f"这一眼像是{STATE_WORDS[view.conclusion]}，还要再看几帧"
+    # 只调整窗口说明，裁判输出和计票规则保持原样。
+    if not locked:
+        detail = getattr(view, "reason", None)
+        if (
+            view.conclusion is None and detail
+            and not (view.needs_yaw or view.needs_pitch)
+        ):
+            text = detail
+        elif detail and detail.startswith("等待相机稳定"):
+            text = detail
+        elif mode == "basic" and view.conclusion is not None:
+            text = f"这一眼像是{STATE_WORDS[view.conclusion]}，等待连续帧锁定"
     shown = locked or view.conclusion
     if view.method == "深度" and view.conclusion is not None and shown == view.conclusion:
         return text + "，深度"
+    if view.method == "黄地" and view.conclusion is not None and shown == view.conclusion:
+        return text + "，黄地"
+    if view.method == "远处" and view.conclusion is not None and shown == view.conclusion:
+        return text + "，远处"
     return text
 
 
@@ -110,8 +145,6 @@ class FieldWatch:
         self.setup = setup
         self.intr = intr
         self.pitch = float(setup.pitch_deg)
-        self.pitch_base = float(setup.pitch_deg)
-        self.pitch_ref: float | None = None
         self.roll = 0.0
         self.votes = {name: Vote() for name in DISPLAY}
         self.last_pose: CarPose | None = None
@@ -127,15 +160,51 @@ class FieldWatch:
         self.chase = {name: "local" for name in DISPLAY}
         self.goal: dict[str, tuple[float, float, str]] = {}
         self.hold = None
+        self.stable_pose = None
+        self.stable_pitch = self.pitch
+        self.stable_frames = 0
+        self.parallax_origins = {}
 
     def follow_pitch(self, measured: float | None) -> None:
-        # 打开时的俯仰就是一开始的框。第一次读数对上这个框，之后只加变化。
+        # 每帧用加速度计旋到彩色系之后的角度。读不到就留在上一帧。
         if measured is None:
             return
-        if self.pitch_ref is None:
-            self.pitch_ref = float(measured)
-            self.pitch_base = float(self.pitch)
-        self.pitch = pitch_from_start(self.pitch_base, self.pitch_ref, measured)
+        self.pitch = float(measured)
+
+    def required_pitch(self) -> float | None:
+        # 正在执行的俯仰指令优先。否则用这一步那一格要对准的角度。
+        if (
+            self.hold is not None
+            and self.hold.kind == "pitch"
+            and self.hold.pitch is not None
+            and self.last_pose is not None
+            and not self._arrived(self.hold)
+        ):
+            return float(self.hold.pitch)
+        if not self.setup.ready or self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
+            return None
+        action = plan_action(
+            self.views,
+            {name: vote.locked for name, vote in self.votes.items()},
+            self.last_pose,
+            self.setup.center_to_corner,
+            self.pitch,
+            self.have_color,
+            self.intr,
+            self.tries,
+            self.visited,
+            {name: vote.recheck for name, vote in self.votes.items()},
+            self.used,
+            self.chase,
+        )
+        if action is None or action.cell is None:
+            return None
+        if action.kind == "pitch" and action.pitch is not None:
+            return float(action.pitch)
+        view = self.views.get(action.cell)
+        if view is None:
+            return None
+        return float(view.pitch_target_deg)
 
     def choose_light(self, level: str) -> None:
         # 人按过数字键之后，不再自动改档，免得和手上的选择对着干。
@@ -159,6 +228,15 @@ class FieldWatch:
                 self.visited.append((self.last_pose.x, self.last_pose.y))
                 self.tries = {name: 0 for name in DISPLAY}
             self.barren = {name: 0 for name in DISPLAY}
+        if (self.stable_pose is None or pose_moved(self.stable_pose, pose)
+                or abs(self.pitch - self.stable_pitch) > 1.0):
+            self.stable_pose = pose
+            self.stable_pitch = self.pitch
+            self.stable_frames = 0
+            for vote in self.votes.values():
+                vote.on_move()
+        else:
+            self.stable_frames += 1
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(
@@ -170,12 +248,32 @@ class FieldWatch:
             depth,
             self.roll,
         )
+        # 请求侧向观察时记住原始光心，不让移动途中的新帧不断移动视差基准。
+        if color is not None:
+            from car_pose import camera_position
+            for name, view in self.views.items():
+                if view.needs_parallax:
+                    origin = camera_position(pose,self.setup.center_to_corner,0.)
+                    self.parallax_origins.setdefault(name,tuple(origin[:2]))
+                if name in self.parallax_origins:
+                    if view.measurements is None:
+                        view.measurements = {}
+                    view.measurements["parallax_origin"] = self.parallax_origins[name]
+                if self.votes[name].locked is not None and not self.votes[name].recheck:
+                    self.parallax_origins.pop(name,None)
+        if color is not None and self.stable_frames < 5:
+            for view in self.views.values():
+                if view.conclusion is None and view.reason:
+                    continue
+                view.reason = f"等待相机稳定：{self.stable_frames}/5帧"
         frac = max((view.white_frac for view in self.views.values()), default=0.0)
         mean_v = min((view.mean_v for view in self.views.values()), default=255.0)
         if color is not None and not self.light_hand:
             self.light, self.light_wait = step_light(self.light, frac, mean_v, self.light_wait)
-        if color is not None:
+        if color is not None and self.stable_frames >= 5:
             for name, view in self.views.items():
+                if view.skip_vote:
+                    continue
                 vote = self.votes[name]
                 was = vote.recheck
                 vote.see(view.conclusion)
@@ -237,7 +335,16 @@ class FieldWatch:
             return rows + official
         locked = {name: vote.locked for name, vote in self.votes.items()}
         for name in sorted(DISPLAY, key=lambda item: TOWER_NO[item]):
-            rows.append(f"{TOWER_NO[name]}：{plain_state(self.views[name], locked[name], mode)}")
+            view, vote = self.views[name], self.votes[name]
+            text = plain_state(view, locked[name], mode)
+            if (
+                locked[name] is None and view.conclusion is not None
+                and self.stable_frames >= 5
+            ):
+                text += f"；连续{vote.count}/15帧"
+            if vote.recheck:
+                text += f"；待重看，旧结果暂留；新结果{vote.count}/15帧"
+            rows.append(f"{TOWER_NO[name]}：{text}")
         if mode == "extend" and len(official) > len(DISPLAY):
             rows.extend(official[len(DISPLAY) :])
         return rows
@@ -295,6 +402,8 @@ class FieldWatch:
             self.goal.pop(name)
 
     def _remember_goal(self, action) -> None:
+        if self.hold is not None and self.hold.kind == "move" and not self._arrived(self.hold):
+            return
         if action is None or action.kind != "move" or action.chase_to is None:
             return
         if action.final_x is None or action.final_y is None:
@@ -334,14 +443,14 @@ class FieldWatch:
             turn = math.atan2(math.sin(pose.yaw - float(hold.yaw)), math.cos(pose.yaw - float(hold.yaw)))
             return abs(math.degrees(turn)) <= 1.0
         if hold.kind == "move":
-            return math.hypot(pose.x - float(hold.x), pose.y - float(hold.y)) <= ARRIVE_M
+            return math.hypot(pose.x - float(hold.x), pose.y - float(hold.y)) <= MOVE_ARRIVE_M
         return True
 
     def _held(self, action) -> str | None:
         if action is None or action.kind in ("wait", "idle"):
             self.hold = None
             return None
-        if action.kind in ("stop", "stuck"):
+        if action.kind in ("stop", "stuck", "blocked"):
             self.hold = None
             return action.text
         if self.hold is not None and not self._arrived(self.hold):
