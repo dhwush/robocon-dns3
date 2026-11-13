@@ -1,13 +1,13 @@
-"""不订雷达，在平面图上点光心，再开相机认塔。
+"""在平面图上点小车右前角，再开相机认塔；支持手动和 CAN 位姿。
 
 python map_test.py
 
-点下去的是相机光心在地面上的位置。点下去就画出从这里看完六格的最短路线。
-再点路线上的圆点，当作车已经到了这一点，光心改到这一站的坐标，窗口列出朝向和俯仰。
-航向在这个窗口里输入，单位是度，正数向左转。没输入时按正前方。改变航向只更新当前朝向，不重新规划路线；选择新的起步光心位置才重画路线。
-点住某一站之后，航向直接用这一站已经算好的角度，再点同一站换下一格。路线不动。回车就在这一站的坐标打开相机，退格仍可改数字。刚打开时俯仰用 config/field.yaml 里的角度。第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。光心高度为 0.669 m（66.9 cm）。
+点下去的是小车右前角在地面上的位置。点下去就画出从这里看完六格的最短路线。
+再点路线上的圆点，当作车已经到了这一点，右前角改到这一站的坐标，窗口列出朝向和俯仰。
+航向在这个窗口里输入，单位是度，正数向左转。没输入时按正前方。改变航向只更新当前朝向，不重新规划路线；选择新的起步右前角位置才重画路线。
+点住某一站之后，航向直接用这一站已经算好的角度，再点同一站换下一格。路线不动。回车就在这一站的坐标打开相机，退格仍可改数字。刚打开时俯仰用 config/field.yaml 里的角度。第一次读到加速度计时框不动，之后俯仰变多少，框就跟着变多少。相机安装高度为 0.669 m（66.9 cm）。
 摄像头窗口最上面写框正在用的俯仰。
-关掉相机窗口后回到平面图，刚才的路线还在。再点一个新的光心才换路线。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
+关掉相机窗口后回到平面图，刚才的路线还在。再点一个新的右前角才换路线。之前打开过相机的点留在窗口里，按数字或点一下那个点就能直接选用。q 或 Esc 退出。
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, camera_position, load_intrinsics, load_setup
+from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, load_intrinsics, load_setup
 from field_map import TOWER_NO, all_cells, tower_cells
 from motion import format_pitch, survey
 from report import FieldWatch
@@ -42,16 +42,16 @@ _COLORS = {
 }
 
 
-def pose_for_optical(x: float, y: float, yaw: float) -> CarPose:
-    # 由光心反推右前角定位点，安装偏移随航向旋转。
-    yaw_c, yaw_s = float(np.cos(yaw)), float(np.sin(yaw))
-    body = OPTICAL_FROM_CORNER
-    rotated = np.array(
-        [yaw_c * body[0] - yaw_s * body[1], yaw_s * body[0] + yaw_c * body[1]],
-        dtype=float,
-    )
-    origin = np.array([x, y], dtype=float) - rotated
-    return CarPose(float(origin[0]), float(origin[1]), float(yaw))
+def pose_for_corner(x: float, y: float, yaw: float) -> CarPose:
+    """地图输入与 CAN 一致，直接表示小车右前角。"""
+    return CarPose(float(x), float(y), float(yaw))
+
+
+def _legacy_optical_pose(x: float, y: float, yaw: float) -> CarPose:
+    """只用于将旧版光心历史点迁移为右前角；不能用于新的地图输入。"""
+    c, s = math.cos(yaw), math.sin(yaw)
+    dx, dy = OPTICAL_FROM_CORNER[:2]
+    return CarPose(x - c * dx + s * dy, y - s * dx - c * dy, yaw)
 
 
 def _outer_limits() -> tuple[float, float, float, float]:
@@ -75,12 +75,6 @@ def _world(u: int, v: int) -> tuple[float, float]:
     return X_MIN + u / SCALE, Y_MAX - v / SCALE
 
 
-def optical_of(x: float, y: float, yaw: float) -> tuple[float, float]:
-    # 路线算的是车位。图上的点和点击都是光心，按同一航向换过去。
-    cam = camera_position(CarPose(x, y, yaw), np.zeros(2), 0.0)
-    return float(cam[0]), float(cam[1])
-
-
 def hit_route(points: list[tuple[float, float]], u: int, v: int) -> int | None:
     # 点在圆点上，14 个像素以内，当作车已经到达这一站。
     chosen = None
@@ -94,13 +88,13 @@ def hit_route(points: list[tuple[float, float]], u: int, v: int) -> int | None:
     return chosen
 
 
-def camera_point(
+def corner_point(
     marker: tuple[float, float] | None,
     route_points: list[tuple[float, float]],
     arrived: int | None,
     pinned: bool,
 ) -> tuple[float, float] | None:
-    # 点住某一站时，回车用这一站的光心。没点住就用起步时点下的那个。
+    # 点住某一站时，回车用这一站的右前角。没点住就用起步时点下的那个。
     if pinned and isinstance(arrived, int) and 0 <= arrived < len(route_points):
         return route_points[arrived]
     return marker
@@ -272,7 +266,9 @@ def load_points(path: Path) -> list[UsedPoint]:
     if not path.is_file():
         return []
     points: list[UsedPoint] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    lines = path.read_text(encoding="utf-8").splitlines()
+    corner_coordinates = "# coordinates: right_front_corner" in lines
+    for line in lines:
         parts = line.split()
         if len(parts) != 3:
             continue
@@ -282,6 +278,9 @@ def load_points(path: Path) -> list[UsedPoint]:
             continue
         if _yaw_from_text(parts[2]) is None:
             continue
+        if not corner_coordinates:
+            pose = _legacy_optical_pose(x, y, _yaw_from_text(parts[2]))
+            x, y = pose.x, pose.y
         points.append(UsedPoint(x, y, parts[2]))
     return _trim_loaded(points)
 
@@ -298,7 +297,8 @@ def _trim_loaded(points: list[UsedPoint]) -> list[UsedPoint]:
 
 
 def save_points(path: Path, points: list[UsedPoint]) -> None:
-    lines = [f"{point.x:.3f} {point.y:.3f} {point.yaw_text}" for point in points]
+    lines = ["# coordinates: right_front_corner"]
+    lines.extend(f"{point.x:.3f} {point.y:.3f} {point.yaw_text}" for point in points)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
@@ -424,13 +424,13 @@ def _draw_map(
             yaw_c, yaw_s = float(np.cos(yaw)), float(np.sin(yaw))
             ahead = (marker[0] - yaw_s * 0.7, marker[1] + yaw_c * 0.7)
             draw.line((u, v, *_pixel(*ahead)), fill=(255, 220, 0), width=2)
-        draw.text((u + 8, v + 4), "光心", font=font, fill=(255, 220, 0))
+        draw.text((u + 8, v + 4), "右前角", font=font, fill=(255, 220, 0))
     if marker is None:
-        hint = f"点一下光心，靠近方块边会吸住。然后在窗口里输入航向，正数向左转。俯仰 {pitch:.0f} 度。q 退出"
+        hint = f"点一下右前角，靠近方块边会吸住。然后在窗口里输入航向，正数向左转。俯仰 {pitch:.0f} 度。q 退出"
         if used:
-            hint = f"点新的光心，或按 1 到 {len(used)} 选用之前的点。俯仰 {pitch:.0f} 度。q 退出"
+            hint = f"点新的右前角，或按 1 到 {len(used)} 选用之前的点。俯仰 {pitch:.0f} 度。q 退出"
     else:
-        hint = "点路线上的圆点，光心和航向改到这一站算出的角度。再点同一站换下一格。回车打开相机。q 退出"
+        hint = "点路线上的圆点，右前角和航向改到这一站算出的角度。再点同一站换下一格。回车打开相机。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
     text_y = 84
     for row in arrived_lines or []:
@@ -458,10 +458,9 @@ def _draw_map(
 
 
 def _open_camera(x: float, y: float, yaw: float, pitch: float, args=None) -> None:
-    pose = pose_for_optical(x, y, yaw)
+    pose = pose_for_corner(x, y, yaw)
     offset = np.zeros(2, dtype=float)
-    optical = camera_position(pose, offset, pitch)
-    print(f"光心 x={optical[0]:.3f} m  y={optical[1]:.3f} m  高 {optical[2]:.3f} m  航向 {np.degrees(yaw):.1f} 度")
+    print(f"右前角 x={pose.x:.3f} m  y={pose.y:.3f} m  航向 {np.degrees(yaw):.1f} 度")
     setup = Setup(False, offset, pitch, "", "rad", origin_basic=True)
     watch = FieldWatch(setup, load_intrinsics(str(ROOT / "config" / "intrinsics.yaml")))
     watch.pitch = pitch
@@ -476,7 +475,7 @@ def _open_camera(x: float, y: float, yaw: float, pitch: float, args=None) -> Non
 
 
 def route_position_key(marker):
-    """路线只在起步光心的位置改变时重算，转头不会改变既定观察任务。"""
+    """路线只在起步右前角的位置改变时重算，转头不会改变既定观察任务。"""
     return None if marker is None else (round(marker[0], 4), round(marker[1], 4))
 
 
@@ -583,13 +582,13 @@ def main() -> None:
                 route_line = []
                 route_points = []
             else:
-                pose = pose_for_optical(marker[0], marker[1], heading)
+                pose = pose_for_corner(marker[0], marker[1], heading)
                 route_stops, line = survey(pose, np.zeros(2, dtype=float), intrinsics)
-                route_line = [optical_of(x, y, heading) for x, y in line]
-                route_points = [optical_of(stop.x, stop.y, heading) for stop in route_stops]
+                route_line = list(line)
+                route_points = [(stop.x, stop.y) for stop in route_stops]
             view["stops"] = route_points
         arrived = view["arrived"]
-        where = camera_point(
+        where = corner_point(
             marker,
             route_points,
             arrived if isinstance(arrived, int) else None,
@@ -599,7 +598,7 @@ def main() -> None:
         if route_stops and isinstance(arrived, int) and 0 <= arrived < len(route_stops):
             lines = stop_lines(route_stops, arrived, int(view["look"]) if view["pinned"] else 0, view.get("arrival_yaw") if view["pinned"] else heading)
         if where is not None:
-            lines.insert(0, f"光心  x {where[0]:+.3f} m  y {where[1]:+.3f} m  航向 {yaw_text or '0'}")
+            lines.insert(0, f"右前角  x {where[0]:+.3f} m  y {where[1]:+.3f} m  航向 {yaw_text or '0'}")
         shown = where if view["pinned"] else marker
         shown_yaw = open_yaw(yaw_text) if view["pinned"] else (heading if marker is not None else None)
         cv2.imshow(
@@ -654,9 +653,8 @@ def main() -> None:
                 args.fixed_target_lines = stop_lines(route_stops, index, int(view["look"]), live_heading["yaw"])
             def live_map(current):
                 live_heading["yaw"] = current.yaw
-                optical = camera_position(current, np.zeros(2), 0)
                 status = [f"实时右前角 x={current.x:+.3f} y={current.y:+.3f} yaw={np.degrees(current.yaw):+.1f}°"]
-                cv2.imshow("route", _draw_map(tuple(optical[:2]), current.yaw, selected_pitch,
+                cv2.imshow("route", _draw_map((current.x, current.y), current.yaw, selected_pitch,
                     route_line=route_line, route_stops=route_points,
                     arrived=view["arrived"], arrived_lines=status + args.fixed_target_lines))
                 cv2.setMouseCallback("route", select_live_target)

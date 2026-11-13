@@ -19,7 +19,7 @@ from map_test import (
     load_points,
     nearest_green_block,
     point_at,
-    pose_for_optical,
+    pose_for_corner,
     remember_point,
     save_points,
 )
@@ -1152,7 +1152,7 @@ def test_used_points_can_be_chosen_again():
         path = Path(folder) / "map_points.txt"
         save_points(path, second)
         assert load_points(path) == second
-        path.write_text("坏行\n1.2 0.4\n0 1 -\n0.2 0.3 10\n", encoding="utf-8")
+        path.write_text("# coordinates: right_front_corner\n坏行\n1.2 0.4\n0 1 -\n0.2 0.3 10\n", encoding="utf-8")
         assert load_points(path) == [UsedPoint(0.2, 0.3, "10")]
 
 
@@ -1279,14 +1279,14 @@ def test_command_stays_until_the_move_is_finished():
 
 
 def test_map_route_lists_heading_and_pitch_when_a_stop_is_clicked():
-    from map_test import hit_route, optical_of, stop_lines, _pixel
+    from map_test import hit_route, stop_lines, _pixel
     from motion import survey
 
-    pose = pose_for_optical(0.0, 0.0, 0.0)
+    pose = pose_for_corner(0.0, 0.0, 0.0)
     stops, line = survey(pose, np.zeros(2), INTR)
     assert stops[0].x == pose.x and stops[0].y == pose.y
     assert line[0] == (pose.x, pose.y)
-    points = [optical_of(stop.x, stop.y, 0.0) for stop in stops]
+    points = [(stop.x, stop.y) for stop in stops]
     assert points[0] == (0.0, 0.0)
     u, v = _pixel(*points[0])
     assert hit_route(points, u, v) == 0
@@ -1317,24 +1317,25 @@ def test_selecting_a_stop_uses_its_calculated_heading():
 
 
 def test_pinned_stop_keeps_its_coordinates_for_the_camera():
-    from map_test import camera_point, open_yaw
+    from map_test import corner_point, open_yaw
 
     start = (0.2, -0.4)
     second = (3.165, 0.284)
-    assert camera_point(start, [start, second], 1, True) == second
-    assert camera_point(start, [start, second], 1, False) == start
+    assert corner_point(start, [start, second], 1, True) == second
+    assert corner_point(start, [start, second], 1, False) == start
     assert open_yaw("") == 0.0
     assert open_yaw("-") is None
     assert abs(open_yaw("-12") + np.deg2rad(12.0)) < 1e-9
 
 
-def test_map_click_lands_on_the_optical_center():
+def test_map_click_lands_on_the_right_front_corner():
     yaw = np.deg2rad(30.0)
-    pose = pose_for_optical(1.2, 0.4, yaw)
+    pose = pose_for_corner(1.2, 0.4, yaw)
     optical = camera_position(pose, np.zeros(2), 0.0)
-    assert np.allclose(optical, [1.2, 0.4, 0.669])
-    straight = pose_for_optical(0.5, 1.0, 0.0)
-    assert np.allclose([straight.x, straight.y], [0.5 + 0.211, 1.0 - 0.05])
+    assert np.allclose([pose.x, pose.y], [1.2, 0.4])
+    assert not np.allclose(optical[:2], [pose.x, pose.y])
+    straight = pose_for_corner(0.5, 1.0, 0.0)
+    assert np.allclose([straight.x, straight.y], [0.5, 1.0])
 
 
 def test_live_pitch_reads_look_up_as_positive():

@@ -1448,6 +1448,58 @@ def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
     return bool(np.mean(np.abs(world[:,2]-cell.base_z) <= 0.03) >= 0.95)
 
 
+
+def _filter_edge_depth(color: np.ndarray, depth: np.ndarray | None) -> np.ndarray | None:
+    """只剔除颜色边界内一像素带中、被同类邻域多数否定的深度；不填补深度。"""
+    if depth is None or depth.shape != color.shape[:2]:
+        return depth
+    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
+    kinds = np.zeros(depth.shape, np.uint8)
+    kinds[_white_mask(color) > 0] = 1
+    red = (cv2.inRange(hsv, np.array(RED[0]), np.array(RED[1]))
+           | cv2.inRange(hsv, np.array(RED_WRAP[0]), np.array(RED_WRAP[1]))) > 0
+    kinds[red] = 2
+    kinds[cv2.inRange(hsv, np.array(BLUE[0]), np.array(BLUE[1])) > 0] = 3
+    edge = np.zeros(depth.shape, bool)
+    for kind in (1, 2, 3):
+        part = (kinds == kind).astype(np.uint8)
+        inner = cv2.erode(part, np.ones((3, 3), np.uint8),
+                          borderType=cv2.BORDER_CONSTANT, borderValue=0)
+        edge |= (part > 0) & (inner == 0)
+    valid = np.isfinite(depth) & (depth >= _DEPTH_NEAR_M)
+    ys, xs = np.nonzero(edge & valid)
+    if not len(xs):
+        return depth
+    padded = np.pad(depth.astype(np.float32), 2, constant_values=np.nan)
+    labels = np.pad(kinds, 2)
+    neighbors = []
+    for dy in range(5):
+        for dx in range(5):
+            if dy == 2 and dx == 2:
+                continue
+            values = padded[ys + dy, xs + dx]
+            same = labels[ys + dy, xs + dx] == kinds[ys, xs]
+            neighbors.append(np.where(same & np.isfinite(values)
+                                      & (values >= _DEPTH_NEAR_M), values, np.nan))
+    samples = np.stack(neighbors, axis=1)
+    enough = np.sum(np.isfinite(samples), axis=1) >= 8
+    if not enough.any():
+        return depth
+    samples = samples[enough]
+    ys, xs = ys[enough], xs[enough]
+    middle = np.nanmedian(samples, axis=1)
+    # 至少相差8厘米，远处按距离的3%提高门槛；只拒绝明显跳变。
+    tolerance = np.maximum(0.08, middle * 0.03)
+    coherent = np.sum(np.abs(samples - middle[:, None]) <= tolerance[:, None], axis=1)
+    majority = coherent >= 0.65 * np.sum(np.isfinite(samples), axis=1)
+    reject = majority & (np.abs(depth[ys, xs] - middle) > tolerance)
+    if not reject.any():
+        return depth
+    cleaned = depth.astype(np.float32, copy=True)
+    cleaned[ys[reject], xs[reject]] = np.nan
+    return cleaned
+
+
 def inspect_frame(
     pose: CarPose,
     offset: np.ndarray,
@@ -1461,6 +1513,7 @@ def inspect_frame(
     pieces = None
     floor = None
     if color is not None:
+        depth = _filter_edge_depth(color, depth)
         white, floor = _split_white(color)
         labels, pieces = _white_pieces(white)
     cloud = None if color is None else _white_cloud(color, depth, pose, offset, pitch, intr, roll)

@@ -1,11 +1,13 @@
-"""连续 15 帧同一结论才锁定。锁定后再有 15 帧不同结论，先标成待重看，不立刻改锁。"""
+"""最近 20 帧内同一结论达到 15 帧才锁定，未知可间断，明确冲突重新计。锁定后再有 15 帧不同结论，先标成待重看，不立刻改锁。"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 
 
 LOCK_FRAMES = 15
+WINDOW_FRAMES = 20
 
 
 @dataclass
@@ -16,6 +18,9 @@ class Vote:
     disagree: int = 0
     recheck: bool = False
     ready: bool = False
+    _history: deque[str | None] = field(
+        default_factory=lambda: deque(maxlen=WINDOW_FRAMES), repr=False
+    )
 
     def see(self, conclusion: str | None) -> None:
         if self.recheck:
@@ -40,6 +45,7 @@ class Vote:
             if self.disagree >= LOCK_FRAMES:
                 self.recheck = True
                 self.ready = False
+                self._history.clear()
                 self.pending = None
                 self.count = 0
                 self.disagree = 0
@@ -49,18 +55,18 @@ class Vote:
             self.locked = conclusion
 
     def _count_fresh(self, conclusion: str | None) -> None:
-        if conclusion is None:
-            self.pending = None
-            self.count = 0
-            return
-        if conclusion == self.pending:
-            self.count += 1
-        else:
+        # 未知占用窗口但不立即清零；明确冲突开始一轮新证据。
+        if conclusion is not None and conclusion != self.pending:
+            self._history.clear()
             self.pending = conclusion
-            self.count = 1
+        self._history.append(conclusion)
+        self.count = sum(item == self.pending for item in self._history) if self.pending else 0
+        if self.count == 0:
+            self.pending = None
 
     def on_move(self) -> None:
         # 车被推走之后，没锁定的格重新计票。待重看的旧结论留着，计票从头来。
+        self._history.clear()
         self.pending = None
         self.count = 0
         self.disagree = 0

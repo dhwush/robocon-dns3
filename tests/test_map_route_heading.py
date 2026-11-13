@@ -20,10 +20,10 @@ def test_mode_buttons_hit_bounds():
 def test_fixed_plan_survives_manual_heading_changes():
     import numpy as np
     from car_pose import load_intrinsics
-    from map_test import ROOT, pose_for_optical, look_yaw_text, stop_lines, open_yaw
+    from map_test import ROOT, pose_for_corner, look_yaw_text, stop_lines, open_yaw
     from motion import survey
     intr = load_intrinsics(str(ROOT / 'config' / 'intrinsics.yaml'))
-    stops, _ = survey(pose_for_optical(0.005, 0.014, 0), np.zeros(2), intr)
+    stops, _ = survey(pose_for_corner(0.005, 0.014, 0), np.zeros(2), intr)
     before = [stop_lines(stops, i) for i in range(len(stops))]
     for text in ('63', '-45', '0'):
         assert open_yaw(text) is not None
@@ -53,3 +53,38 @@ def test_repeated_click_uses_previous_heading_and_wraps_short_turn():
     view = {'pinned':True,'arrived':0,'look':0}
     select_route_stop(view,stops,0,math.radians(170))
     assert '需向左转 20 度' in '\n'.join(stop_lines(stops,0,view['look'],view['arrival_yaw']))
+
+
+def test_history_migrates_optical_points_once(tmp_path):
+    import math
+    import numpy as np
+    from car_pose import CarPose, camera_position
+    from map_test import load_points, save_points
+    path = tmp_path / 'points.txt'
+    # 旧点在不同航向下均保存光心，读入后必须恢复同一个右前角。
+    lines = []
+    for degrees in (0, 63, 90, 180, -135):
+        optical = camera_position(CarPose(1.2, .4, math.radians(degrees)), np.zeros(2), 0)
+        lines.append(f'{optical[0]:.10f} {optical[1]:.10f} {degrees}')
+    path.write_text('\n'.join(lines))
+    points = load_points(path)
+    for point in points:
+        np.testing.assert_allclose((point.x, point.y), (1.2, .4), atol=1e-9)
+    save_points(path, points)
+    again = load_points(path)
+    for point in again:
+        assert (point.x, point.y) == (1.2, .4)
+    assert [point.yaw_text for point in again] == [point.yaw_text for point in points]
+
+
+def test_camera_entry_preserves_corner_in_all_modes(monkeypatch):
+    import math
+    from types import SimpleNamespace
+    import map_test
+    captured = []
+    monkeypatch.setattr(map_test, '_live', lambda args, watch, pose: captured.append(pose))
+    for mode in ('static', 'ssh', 'local'):
+        for heading in (0, 63, 90, 180, -135):
+            yaw = math.radians(heading)
+            map_test._open_camera(1.2, .4, yaw, 0, SimpleNamespace(pose_source=mode))
+            assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, yaw)

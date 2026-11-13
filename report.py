@@ -8,7 +8,7 @@ from car_pose import CarPose, Intrinsics, Setup, pose_moved
 from classify import inspect_frame
 from field_map import DISPLAY, TOWER_NO
 from motion import MOVE_ARRIVE_M, ARRIVE_M, MAX_TRIES, format_pitch, place_done, plan_action
-from vote import Vote
+from vote import LOCK_FRAMES, WINDOW_FRAMES, Vote
 
 
 LEVELS = ("bright", "daylight", "indoor", "dim", "dark")
@@ -117,7 +117,7 @@ def plain_state(view, locked: str | None, mode: str) -> str:
         elif detail and detail.startswith("等待相机稳定"):
             text = detail
         elif mode == "basic" and view.conclusion is not None:
-            text = f"这一眼像是{STATE_WORDS[view.conclusion]}，等待连续帧锁定"
+            text = f"这一眼像是{STATE_WORDS[view.conclusion]}，等待多帧确认"
     shown = locked or view.conclusion
     if view.method == "深度" and view.conclusion is not None and shown == view.conclusion:
         return text + "，深度"
@@ -341,9 +341,9 @@ class FieldWatch:
                 locked[name] is None and view.conclusion is not None
                 and self.stable_frames >= 5
             ):
-                text += f"；连续{vote.count}/15帧"
+                text += f"；最近{WINDOW_FRAMES}帧内同结论{vote.count}/{LOCK_FRAMES}帧"
             if vote.recheck:
-                text += f"；待重看，旧结果暂留；新结果{vote.count}/15帧"
+                text += f"；待重看，旧结果暂留；最近{WINDOW_FRAMES}帧内新结果{vote.count}/{LOCK_FRAMES}帧"
             rows.append(f"{TOWER_NO[name]}：{text}")
         if mode == "extend" and len(official) > len(DISPLAY):
             rows.extend(official[len(DISPLAY) :])
