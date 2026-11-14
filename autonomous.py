@@ -10,7 +10,7 @@ from car_pose import (CarPose, camera_position, observation_moved,
                       OBS_STABLE_FRAMES, OBS_ANGLE_JITTER_DEG)
 from field_map import DISPLAY, TOWER_NO, tower_cells
 from motion import (Action, MAX_TRIES, GOAL_BEARING, PITCH_OFFSET, heading_words, format_pitch, _aim_cell, _looks,
-                    fits_when_aimed, nearest_observation)
+                    fits_when_aimed, fits_rgb_when_aimed, nearest_observation, DEPTH_FAR_M, _slant, primary_route, _travel, _move_toward)
 
 WINDOW_SECONDS = 2.0
 CONFIRM_WINDOWS = 3
@@ -83,6 +83,9 @@ class AutonomousSurvey:
         self.last_update = None
         self.message = "等待相机稳定"
         self.blocked_until = 0.0
+        self.primary_stops = None
+        self.primary_line = []
+        self.primary_index = 1
 
     @property
     def complete(self):
@@ -96,6 +99,11 @@ class AutonomousSurvey:
         self.look_key = None
         self.anchor = None
         self.action = None
+
+    def required_checks(self, name):
+        cell = next(c for c in tower_cells() if c.name == name)
+        distance = _slant(cell,camera_position(self.watch.last_pose,self.watch.setup.center_to_corner,0.))
+        return 3 if distance > DEPTH_FAR_M else 2
 
     def _record(self, name, event, result, now, previous=None):
         watch = self.watch
@@ -146,6 +154,11 @@ class AutonomousSurvey:
                 evidence.clear()
                 continue
             value = None if view.skip_vote else view.conclusion
+            # 远距试读只采信独立顶块；空点/白盒仍用原有近距规划确认。
+            cell = next(c for c in tower_cells() if c.name == name)
+            far = _slant(cell, camera_position(pose, watch.setup.center_to_corner, 0.)) > DEPTH_FAR_M
+            if far and (value not in ('红', '蓝') or view.method != 'RGB顶块'):
+                value = None
             result = evidence.see(value, now)
             if result is None:
                 continue
@@ -175,7 +188,7 @@ class AutonomousSurvey:
             if distinct:
                 checks.append(dict(result=result, pitch=watch.pitch))
                 self._record(name, "pitch_checked", result, now)
-            if len(checks) < 2:
+            if len(checks) < self.required_checks(name):
                 if distinct:
                     self.attempts[name] = min(MAX_TRIES, self.attempts[name] + 1)
                     if self.action is not None and self.action.cell == name:
@@ -206,6 +219,13 @@ class AutonomousSurvey:
             self.action = None
             self.look_key = None
             self.look_started = None
+        if self.primary_stops is None:
+            self.primary_stops, self.primary_line = primary_route(pose,offset,intr)
+        while self.primary_index < len(self.primary_stops):
+            stop = self.primary_stops[self.primary_index]
+            if math.hypot(stop.x-pose.x,stop.y-pose.y) > .08:
+                break
+            self.primary_index += 1
         pending = [n for n in DISPLAY if watch.votes[n].locked is None or watch.votes[n].recheck]
         if not pending:
             self.action = Action("stop", "全部区域已自动确认")
@@ -231,6 +251,7 @@ class AutonomousSurvey:
             if self.attempts[name] >= MAX_TRIES:
                 continue
             if not (fits_when_aimed(cells[name], pose, offset, intr)
+                    or fits_rgb_when_aimed(cells[name], pose, offset, intr)
                     or view.conclusion is not None and view.in_view):
                 continue
             action = _aim_cell(name, view, pose, offset, watch.pitch, True, intr, self.attempts[name])
@@ -247,7 +268,7 @@ class AutonomousSurvey:
                 if key != self.look_key:
                     self.look_key, self.look_started = key, now
                 progress = self.evidence[name].windows
-                self.message = f"{TOWER_NO[name]}号：俯仰复核{len(self.pitch_checks[name])}/2档；本档稳定{progress}/{CONFIRM_WINDOWS}段（每段至少{WINDOW_SECONDS:g}秒）"
+                self.message = f"{TOWER_NO[name]}号：俯仰复核{len(self.pitch_checks[name])}/{self.required_checks(name)}档；本档稳定{progress}/{CONFIRM_WINDOWS}段（每段至少{WINDOW_SECONDS:g}秒）"
                 if now-self.look_started >= LOOK_SECONDS and progress == 0:
                     self.attempts[name] += 1
                     self.look_key = self.look_started = None
@@ -257,7 +278,25 @@ class AutonomousSurvey:
                 return
             self.message = f"原地调整{TOWER_NO[name]}号观察角度（{action.attempt+1}/{MAX_TRIES}）"
             return
-        # 原地视角用尽或明确需要视差，才寻找实际路程最短的有效观察点。
+        # 当前点看够后先走近处主线，沿途点重新扫描远塔；只有主线用尽才去兜底。
+        while self.primary_index < len(self.primary_stops):
+            stop = self.primary_stops[self.primary_index]
+            useful = tuple(n for n in pending if fits_rgb_when_aimed(cells[n],
+                CarPose(stop.x,stop.y,pose.yaw),offset,intr))
+            if not useful:
+                self.primary_index += 1
+                continue
+            trip = _travel(pose.x,pose.y,stop.x,stop.y,[],pose.yaw)
+            if trip is None:
+                self.primary_index += 1
+                continue
+            self.action = _move_toward(pose,stop.x,stop.y,trip[1],'primary',tuple(pending))
+            if self.action is not None:
+                self.message = f"主路线→{stop.kind}；停稳后复看远处顶块"
+                self.look_key = self.look_started = None
+                return
+            self.primary_index += 1
+        # 主线用尽仍未确认的塔，才规划近距兜底。
         references = {}
         origin = camera_position(pose, offset, 0.)
         for name in pending:
@@ -291,7 +330,7 @@ class AutonomousSurvey:
             rows.append(f"【{TOWER_NO[name]}号冲突】原确认：{old}；新稳定识别：{new}；当前复核：{candidate}")
             checks = len(self.pitch_checks[name])
             progress = self.evidence[name].windows
-            rows.append(f"流程改为优先复核：旧结果暂留，不计完成；换姿态后重新采样，俯仰{checks}/2档、本档{progress}/{CONFIRM_WINDOWS}段")
+            rows.append(f"流程改为优先复核：旧结果暂留，不计完成；换姿态后重新采样，俯仰{checks}/{self.required_checks(name)}档、本档{progress}/{CONFIRM_WINDOWS}段")
             action = self.action
             if action is not None and action.kind == 'move':
                 rows.append("冲突后续：原地无可用复核姿态，换到新观察点，重新累计两档一致结果")
@@ -332,7 +371,7 @@ class AutonomousSurvey:
                 pitches = '、'.join(format_pitch(base_pitch+d) for d in (0.,8.,-8.))
                 rows.append(f"每个朝向的相机姿态：{pitches}")
                 rows.append(f"当前第{action.attempt+1}/{MAX_TRIES}档；目标：{format_pitch(base_pitch+PITCH_OFFSET[action.attempt])}")
-                rows.append(f"俯仰复核{len(self.pitch_checks[action.cell])}/2档：不同俯仰稳定结果一致才确认；出画档跳过")
+                rows.append(f"俯仰复核{len(self.pitch_checks[action.cell])}/{self.required_checks(action.cell)}档：不同俯仰稳定结果一致才确认；出画档跳过")
             if action.kind == "move" and action.final_x is not None:
                 stood = CarPose(action.final_x, action.final_y, pose.yaw)
                 rows.append(f"观察落点：x={stood.x:+.3f} m y={stood.y:+.3f} m")
@@ -344,6 +383,16 @@ class AutonomousSurvey:
             rows.append("最终结果")
             rows.extend(f"{TOWER_NO[n]} {watch.votes[n].locked}" for n in sorted(DISPLAY, key=lambda n: TOWER_NO[n]))
         return rows
+
+    def route_display(self):
+        points = [(s.x,s.y) for s in self.primary_stops or []]
+        active = None
+        if self.action is not None and self.action.kind == 'move':
+            a = self.action
+            active = [(self.watch.last_pose.x,self.watch.last_pose.y),(a.x,a.y)]
+        return dict(points=points, line=self.primary_line, active=active,
+                    index=self.primary_index, complete=self.complete,
+                    kinds=[s.kind for s in self.primary_stops or []])
 
     def snapshot(self):
         return dict(coordinates="场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",

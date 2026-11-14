@@ -128,16 +128,16 @@ def select_route_stop(view: dict, stops: list, index: int, current_yaw: float) -
 
 def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | None = None) -> list[str]:
     stop = stops[index]
-    lines = [f"第{index + 1}/{len(stops)}个观察点：车停在这里，原地转动观察"]
+    lines = [f"{stop.kind}（{index + 1}/{len(stops)}）：车停在这里，原地转动观察"]
     if not stop.looks:
         return lines + ["这一站没有新的待观察塔"]
     lines.append("以下是车头目标朝向，以场地正前方为0°；不是每次再转这么多")
     offsets = tuple(dict.fromkeys(GOAL_BEARING))
-    for look_index, look in enumerate(stop.looks):
-        current = "【当前选择】" if look_index == chosen % len(stop.looks) else ""
-        lines.append(f"{look.number}号塔{current}：先朝{heading_words(look.yaw_deg)}，相机{format_pitch(look.pitch_deg)}")
-        headings = '、'.join(heading_words(look.yaw_deg + delta) for delta in offsets)
-        lines.append(f"  依次朝向：{headings}")
+    lines.append("本站可观测塔：" + '、'.join(look.number for look in stop.looks) + "（再点本站切换）")
+    look = stop.looks[chosen % len(stop.looks)]
+    lines.append(f"{look.number}号塔【当前选择】：先朝{heading_words(look.yaw_deg)}，相机{format_pitch(look.pitch_deg)}")
+    headings = '、'.join(heading_words(look.yaw_deg + delta) for delta in offsets)
+    lines.append(f"依次朝向：{headings}")
     if arrival_yaw is not None:
         look = stop.looks[chosen % len(stop.looks)]
         turn = (look.yaw_deg - math.degrees(arrival_yaw) + 180.0) % 360.0 - 180.0
@@ -149,7 +149,7 @@ def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | No
     look = stop.looks[chosen % len(stop.looks)]
     pitches = '、'.join(format_pitch(look.pitch_deg+d) for d in (0.,8.,-8.))
     lines.append(f"当前塔每个朝向都测：{pitches}（其他塔也按基准上下各8°）")
-    lines.append("至少两个不同俯仰的稳定结果一致才确认；出画档跳过")
+    lines.append("近处两档、远处三档俯仰一致才确认；出画档跳过")
     lines.append("回车打开相机自动测量；再点本站可切换所选塔")
     return lines
 
@@ -372,6 +372,7 @@ def _draw_map(
     route_stops: list[tuple[float, float]] | None = None,
     arrived: int | None = None,
     arrived_lines: list[str] | None = None,
+    route_state: dict | None = None,
 ) -> np.ndarray:
     import cv2
     from PIL import Image, ImageDraw, ImageFont
@@ -414,15 +415,26 @@ def _draw_map(
     ox, oy = _pixel(0.0, 0.0)
     draw.ellipse((ox - 4, oy - 4, ox + 4, oy + 4), fill=(255, 80, 80))
     draw.text((ox + 8, oy - 8), "原点", font=font, fill=(255, 180, 180))
+    if route_state:
+        route_line = route_state['line']
+        route_stops = route_state['points']
+        arrived = max(0,route_state['index']-1)
     if route_line and len(route_line) >= 2:
-        draw.line([_pixel(x, y) for x, y in route_line], fill=(255, 140, 0), width=3)
+        draw.line([_pixel(x,y) for x,y in route_line], fill=(60,230,150), width=4)
+    if route_state and route_state.get('active') and not route_state.get('complete'):
+        # 实际执行段加粗橙色；兜底只在确实需要时出现，不预画整条远端环路。
+        draw.line([_pixel(x,y) for x,y in route_state['active']],fill=(255,150,40),width=5)
+    if route_stops:
+        draw.text((560,60),"绿：A起点→途1/途2→B近点  橙：当前执行段；远端按需追加",font=font,fill=(100,235,180))
     for index, point in enumerate(route_stops or [], start=1):
         u, v = _pixel(*point)
         if arrived == index - 1:
             draw.ellipse((u - 8, v - 8, u + 8, v + 8), fill=(255, 140, 0), outline=(255, 230, 160))
         else:
-            draw.ellipse((u - 7, v - 7, u + 7, v + 7), outline=(255, 140, 0), width=2)
-        draw.text((u + 10, v - 10), str(index), font=font, fill=(255, 190, 90))
+            draw.ellipse((u - 7, v - 7, u + 7, v + 7), outline=(60, 230, 150), width=2)
+        label = 'A' if index == 1 else 'B' if index == len(route_stops) else f'途{index-1}'
+        label_y = v-32 if index % 2 else v+14
+        draw.text((u-5,label_y),label,font=font,fill=(160,255,200))
     if marker is not None:
         u, v = _pixel(*marker)
         draw.ellipse((u - 6, v - 6, u + 6, v + 6), outline=(255, 220, 0), width=2)
@@ -722,7 +734,8 @@ def main() -> None:
                 cv2.imshow("route", _draw_map(None if current is None else (current.x, current.y),
                     None if current is None else current.yaw, selected_pitch,
                     route_line=route_line, route_stops=route_points,
-                    arrived=view["arrived"], arrived_lines=status + getattr(args, "autonomous_lines", args.fixed_target_lines)))
+                    arrived=view["arrived"], arrived_lines=status + getattr(args, "autonomous_map_lines", args.fixed_target_lines),
+                    route_state=getattr(args,"autonomous_route",None)))
                 cv2.setMouseCallback("route", select_live_target)
             args.live_map = live_map
             _open_camera(where[0], where[1], opening, selected_pitch, args)

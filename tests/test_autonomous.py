@@ -31,6 +31,8 @@ def make_survey(monkeypatch):
         intr=load_intrinsics('config/intrinsics.yaml'),
         votes={n: Vote() for n in DISPLAY}, _arrived=lambda action: True)
     monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda cell, *args: cell.name == name)
+    monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda *args: False)
+    monkeypatch.setattr(autonomous, 'primary_route', lambda *args: ([],[]))
     monkeypatch.setattr(autonomous, 'nearest_observation', lambda *args: Action('blocked', '无安全位置'))
     def aim(n, v, p, o, pitch, color, intr, attempt):
         if attempt == 1 and abs(pitch-8.) > 1:
@@ -389,3 +391,100 @@ def test_conflict_window_explains_movement_and_blocked_followup(monkeypatch):
     assert '换到新观察点' in text
     survey.action = Action('blocked', '等待')
     assert '保留冲突，等待条件变化后重试' in '\n'.join(survey.lines())
+
+
+def test_far_rgb_is_tried_here_and_two_pitches_remove_move_task(monkeypatch):
+    from field_map import tower_cells
+    from car_pose import camera_position
+    survey, watch, clock, name = make_survey(monkeypatch)
+    cell = next(c for c in tower_cells() if c.name == name)
+    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
+    monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda *args: False)
+    monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda c,*args: c.name == name)
+    watch.views[name].conclusion = '红'
+    watch.views[name].method = 'RGB顶块'
+    for n,vote in watch.votes.items():
+        if n != name:
+            vote.locked = '1'
+    observe(survey,clock,7)
+    assert watch.votes[name].locked is None
+    assert survey.action.kind == 'pitch'
+    watch.pitch = 8.
+    observe(survey,clock,7)
+    assert watch.votes[name].locked is None
+    watch.pitch = -8.
+    observe(survey,clock,7)
+    assert watch.votes[name].locked == '红'
+    assert survey.action.kind == 'stop'
+    assert survey.complete
+
+
+def test_far_rgb_opportunity_cannot_confirm_empty_or_white_only(monkeypatch):
+    from field_map import tower_cells
+    survey, watch, clock, name = make_survey(monkeypatch)
+    cell = next(c for c in tower_cells() if c.name == name)
+    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
+    monkeypatch.setattr(autonomous,'fits_rgb_when_aimed',lambda c,*args: c.name == name)
+    for value in ('0','1','2'):
+        watch.views[name].conclusion = value
+        observe(survey,clock,7)
+        watch.pitch += 8.
+        observe(survey,clock,7)
+        assert watch.votes[name].locked is None
+        assert not survey.pitch_checks[name]
+
+
+def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range():
+    import motion
+    from field_map import tower_cells
+    cell = tower_cells()[0]
+    offset = np.zeros(2)
+    intr = load_intrinsics('config/intrinsics.yaml')
+    pose = CarPose(cell.x,cell.y-4.5,0.)
+    assert not motion.fits_when_aimed(cell,pose,offset,intr)
+    assert motion.fits_rgb_when_aimed(cell,pose,offset,intr)
+    assert not motion.fits_rgb_when_aimed(cell,CarPose(cell.x,cell.y-40.,0.),offset,intr)
+    assert motion.DEPTH_FAR_M == 3.
+
+
+def test_primary_stations_run_before_far_fallback(monkeypatch):
+    from motion import RouteStop
+    survey, watch, clock, name = make_survey(monkeypatch)
+    for n,vote in watch.votes.items():
+        if n != name:
+            vote.locked = '1'
+    watch.views[name].conclusion = None
+    survey.primary_stops = [RouteStop(0,0,(),'A起点'),RouteStop(.5,0,(),'沿途复看'),RouteStop(1,0,(),'B近点')]
+    survey.primary_line = [(0,0),(1,0)]
+    survey.attempts[name] = autonomous.MAX_TRIES
+    monkeypatch.setattr(autonomous,'fits_rgb_when_aimed',lambda c,*args: c.name == name)
+    monkeypatch.setattr(autonomous,'_travel',lambda x,y,a,b,*args: (abs(a-x),[(x,y),(a,b)]))
+    def no_fallback(*args):
+        raise AssertionError('主线尚未走完，不应提前去远处')
+    monkeypatch.setattr(autonomous,'nearest_observation',no_fallback)
+    survey._schedule(clock())
+    assert survey.action.kind == 'move'
+    assert survey.action.chase_to == 'primary'
+    assert survey.action.final_x == .5
+    # 已在沿途点停稳：重新累计原地观察，不直接跳到远端。
+    survey.anchor = CarPose(0,0,0)
+    survey.anchor_pitch = survey.anchor_roll = 0.
+    watch.last_pose = CarPose(.5,0,0)
+    observe(survey,clock,1)
+    assert survey.primary_index == 2
+    assert survey.action.kind == 'wait'
+
+
+def test_primary_path_is_short_and_every_station_has_looks():
+    import motion
+    pose = CarPose(0,0,0)
+    stops,line = motion.primary_route(pose,np.zeros(2),load_intrinsics('config/intrinsics.yaml'))
+    assert stops[0].kind == 'A起点'
+    assert (stops[0].x,stops[0].y) == (0,0)
+    assert len(stops) >= 2
+    assert stops[-1].kind == 'B近点'
+    assert sum(math.dist(a,b) for a,b in zip(line,line[1:])) <= 1.8
+    assert all(s.looks for s in stops)
+    assert {look.number for look in stops[0].looks} >= {'3','6'}
+    assert all(motion._parking_clear(s.x,s.y,pose.yaw) for s in stops)
+    assert all(motion._path_clear(*a,*b,pose.yaw) for a,b in zip(line,line[1:]))

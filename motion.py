@@ -54,6 +54,7 @@ class RouteStop:
     x: float
     y: float
     looks: tuple[Look, ...]
+    kind: str = "兜底"
 
 
 @dataclass(frozen=True)
@@ -137,7 +138,7 @@ def place_done(locked: dict[str, str | None], pose: CarPose, offset: np.ndarray,
     return True
 
 
-def observation_poses(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics):
+def observation_poses(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics, allow_rgb=False):
     """与原地扫描相同的姿态集合；索引对应执行器的attempt。"""
     centered = aimed_pose(pose, offset, cell)
     for index, (goal, delta_pitch) in enumerate(zip(GOAL_BEARING, PITCH_OFFSET)):
@@ -153,15 +154,24 @@ def observation_poses(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics)
             continue
         if not _sees(cell, faced, offset, pitch, intr):
             continue
-        if visible_height(faced, offset, pitch, cell, cell.base_z, cell.one_z) < MIN_VISIBLE_M:
-            continue
         slant = _slant(cell, camera_position(faced, offset, 0.0))
-        if DEPTH_NEAR_M <= slant <= DEPTH_FAR_M:
-            yield index, faced, pitch
+        if slant > DEPTH_FAR_M and allow_rgb:
+            # 远处只承诺顶块有足够像素可试读，不把它当作已识别整塔。
+            if (.20*intr.fx/slant >= 12 and .20*intr.fy/slant >= 16
+                    and visible_height(faced, offset, pitch, cell, cell.two_z, cell.cap_z) >= .14):
+                yield index, faced, pitch
+        elif DEPTH_NEAR_M <= slant <= DEPTH_FAR_M:
+            if visible_height(faced, offset, pitch, cell, cell.base_z, cell.one_z) >= MIN_VISIBLE_M:
+                yield index, faced, pitch
 
 
 def fits_when_aimed(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics) -> bool:
     return next(observation_poses(cell, pose, offset, intr), None) is not None
+
+
+def fits_rgb_when_aimed(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics) -> bool:
+    """当前点是否值得先尝试远处RGB；不用于证明空点或无顶块塔。"""
+    return next(observation_poses(cell, pose, offset, intr, allow_rgb=True), None) is not None
 
 
 def _near_visited(x: float, y: float, visited: list[tuple[float, float]]) -> bool:
@@ -378,7 +388,7 @@ def _looks(pose: CarPose, offset: np.ndarray, intr: Intrinsics, names: list[str]
     remaining = []
     for name in names:
         cell = cells[name]
-        poses = tuple(observation_poses(cell, pose, offset, intr))
+        poses = tuple(observation_poses(cell, pose, offset, intr, allow_rgb=True))
         if not poses:
             continue
         centered = aimed_pose(pose, offset, cell)
@@ -685,27 +695,58 @@ def _relocate(
     return action
 
 
+def primary_route(pose, offset, intr):
+    """起点A、沿途两次停稳复看、1.4米内近点B；不预先承诺远处塔型。"""
+    cells = _cells()
+    def targets(stood):
+        return tuple(n for n,c in cells.items() if fits_rgb_when_aimed(c,stood,offset,intr))
+    start = RouteStop(pose.x,pose.y,_looks(pose,offset,intr,targets(pose)), 'A起点')
+    best = None
+    for radius in (1.0,1.4):
+        for degree in range(0,360,45):
+            angle = math.radians(degree)
+            x,y = pose.x+radius*math.cos(angle),pose.y+radius*math.sin(angle)
+            if not _parking_clear(x,y,pose.yaw):
+                continue
+            trip = _travel(pose.x,pose.y,x,y,[],pose.yaw)
+            if trip is None or trip[0] > 1.8:
+                continue
+            stood = CarPose(x,y,pose.yaw)
+            names = targets(stood)
+            near = sum(fits_when_aimed(cells[n],stood,offset,intr) for n in names)
+            if not names or not near:
+                continue
+            rank = (-len(names),-near,trip[0])
+            if best is None or rank < best[0]:
+                best = rank,stood,names,trip[1],trip[0]
+    if best is None:
+        return [start], [(pose.x,pose.y)]
+    _,stood,names,line,length = best
+    stops = [start]
+    # 沿规划折线插入停靠点，禁止把绕障折线直接连成穿台捷径。
+    for fraction in (1/3,2/3):
+        remaining = length*fraction
+        point = None
+        for first,second in zip(line,line[1:]):
+            span = math.dist(first,second)
+            if remaining <= span and span > 0:
+                t = remaining/span
+                point = (first[0]+t*(second[0]-first[0]),first[1]+t*(second[1]-first[1]))
+                break
+            remaining -= span
+        if point is None or not _parking_clear(*point,pose.yaw):
+            continue
+        paused = CarPose(*point,pose.yaw)
+        observed = targets(paused)
+        if observed:
+            stops.append(RouteStop(*point,_looks(paused,offset,intr,observed),'沿途复看'))
+    stops.append(RouteStop(stood.x,stood.y,_looks(stood,offset,intr,names),'B近点'))
+    return stops,line
+
+
 def survey(pose: CarPose, offset: np.ndarray, intr: Intrinsics) -> tuple[list[RouteStop], list[tuple[float, float]]]:
-    # 起点先记下已经能看清的格。剩下的按最短路线排停点。折线是车位，不是光心。
-    here = []
-    need = []
-    for cell in tower_cells():
-        if fits_when_aimed(cell, pose, offset, intr):
-            here.append(cell.name)
-        else:
-            need.append(cell.name)
-    start = RouteStop(pose.x, pose.y, _looks(pose, offset, intr, here))
-    if not need:
-        return [start], [(pose.x, pose.y)]
-    planned = _search(pose, offset, intr, need, [])
-    if planned is None:
-        return [start], [(pose.x, pose.y)]
-    stops, line = planned
-    route = [start]
-    for x, y, named in stops:
-        stood = CarPose(x, y, pose.yaw, pose.stamp)
-        route.append(RouteStop(x, y, _looks(stood, offset, intr, named)))
-    return route, line
+    # 地图先展示A→B主线；兜底由实时未确认任务决定，不画成必须走完的远端环路。
+    return primary_route(pose,offset,intr)
 
 
 def _sees(cell, pose: CarPose, offset: np.ndarray, pitch: float, intr: Intrinsics) -> bool:

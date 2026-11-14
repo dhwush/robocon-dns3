@@ -230,13 +230,17 @@ def live_panels(watch, pose, source, extras=()):
         yaw = action.yaw if action.yaw is not None else pose.yaw
         target_pitch = view.pitch_target_deg + PITCH_OFFSET[action.attempt]
         left.append(f"本档目标：{heading_words(np.degrees(yaw))} · {format_pitch(target_pitch)}")
-        left.append(f"俯仰复核：{len(survey.pitch_checks[action.cell])}/2档")
+        required = survey.required_checks(action.cell) if hasattr(survey,'required_checks') else 2
+        left.append(f"俯仰复核：{len(survey.pitch_checks[action.cell])}/{required}档" )
     elif action is not None and action.kind == 'move':
         left.append(f"下一点：x={action.x:+.2f}m y={action.y:+.2f}m")
     else:
         left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
-    bottom = ([survey.message] if survey is not None else []) + list(extras)
-    bottom += ["朝向以场地前方为0°；停稳测量，两档俯仰一致才确认",
+    route_hint = []
+    if survey is not None and getattr(survey,'primary_stops',None):
+        route_hint = [f"主线 A→沿途复看→B近点（{min(survey.primary_index,len(survey.primary_stops))}/{len(survey.primary_stops)}）；远塔确认即跳过远端行程"]
+    bottom = route_hint + ([survey.message] if survey is not None else []) + list(extras)
+    bottom += ["朝向以场地前方为0°；近处两档、远处三档一致才确认；主线看够再去兜底",
                "1–5 光线 | d 诊断 | n 切换塔 | s 保存 | q 退出"]
     return dict(left=left, right=right, bottom=bottom)
 
@@ -478,7 +482,9 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         # 第一组 CAN 对应传入的已知场地右前角位姿，统一变换后再投影。
         watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
     previous_session = getattr(args, "survey_session", None)
-    if previous_session is None:
+    if args.mode == "static":
+        pass  # 独立静态模式不启动自主移动流程。
+    elif previous_session is None:
         watch.enable_autonomy()
         args.survey_session = watch.autonomy
         args.survey_report = ROOT / "debug_captures" / ("survey_" + time.strftime("%Y%m%d_%H%M%S") + ".json")
@@ -488,10 +494,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         previous_session.watch = watch
         previous_session.pause()
     report_saved_at = 0.0
-    print(f"自主识别记录：{args.survey_report}")
-    pipeline, sensor, ready, lock, pending = _open_camera(rs)
-    watch.intr = pending["intrinsics"]
-    camera = pending["camera"]
+    if watch.autonomy is not None:
+        print(f"自主识别记录：{args.survey_report}")
+    pipeline, sensor, ready, lock, camera_frames = _open_camera(rs)
+    watch.intr = camera_frames["intrinsics"]
+    camera = camera_frames["camera"]
     print(f"相机序列号：{camera['serial_number']}；内参来源：当前彩色流")
     print(f"内参：{watch.intr.width}×{watch.intr.height} "
           f"fx={watch.intr.fx:.6f} fy={watch.intr.fy:.6f} "
@@ -526,11 +533,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 continue
             ready.clear()
             with lock:
-                color = pending["color"]
-                depth = pending["depth"]
-                gravity = None if pending["gravity"] is None else pending["gravity"].copy()
-                stamp = float(pending["stamp"])
-                received = float(pending["received"])
+                color = camera_frames["color"]
+                depth = camera_frames["depth"]
+                gravity = None if camera_frames["gravity"] is None else camera_frames["gravity"].copy()
+                stamp = float(camera_frames["stamp"])
+                received = float(camera_frames["received"])
             if color is None or depth is None:
                 continue
             measured = pitch_from_gravity(gravity)
@@ -601,13 +608,21 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 light = watch.light
                 _apply_light(sensor, rs, light)
                 exposure_wait = 5
-            args.autonomous_lines = watch.autonomy.lines()
-            if time.monotonic() - report_saved_at >= 1.0:
-                try:
-                    watch.autonomy.save(args.survey_report)
-                except OSError as error:
-                    print(f"保存自主识别记录失败：{error}")
-                report_saved_at = time.monotonic()
+            if watch.autonomy is not None:
+                args.autonomous_lines = watch.autonomy.lines()
+                args.autonomous_route = watch.autonomy.route_display()
+                confirmed = [TOWER_NO[n] for n,v in watch.votes.items() if v.locked is not None and not v.recheck]
+                pending_towers = [TOWER_NO[n] for n,v in watch.votes.items() if v.locked is None or v.recheck]
+                args.autonomous_map_lines = [watch.autonomy.message,
+                    "已确认塔：" + ('、'.join(confirmed) or '无'),
+                    "待测塔：" + ('、'.join(pending_towers) or '无；测量完成'),
+                    "A起点→沿途复看→B近点；主线用尽才去远处兜底"]
+                if time.monotonic() - report_saved_at >= 1.0:
+                    try:
+                        watch.autonomy.save(args.survey_report)
+                    except OSError as error:
+                        print(f"保存自主识别记录失败：{error}")
+                    report_saved_at = time.monotonic()
             fixed_targets = getattr(args, "fixed_target_lines", [])
             result_mode = args.mode
             lines = watch.lines(result_mode)
@@ -636,7 +651,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             painted.append("d 颜色/深度诊断，n 切换塔，s 保存原始帧")
             cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted,
                                              show_boxes=source == "ssh",
-                                             panels=live_panels(watch, current, source,
+                                             panels=None if args.mode == "static" else live_panels(watch, current, source,
                                                  [shown[0]] + ([line for line in painted if line.startswith(("慢速验证", "CAN 接收年龄"))]))))
             if debug_visible:
                 cv2.imshow("颜色与深度诊断", paint_diagnostics(color, depth, watch.views, debug_selected, locked))
@@ -674,10 +689,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 _apply_light(sensor, rs, light)
                 exposure_wait = 5
     finally:
-        try:
-            watch.autonomy.save(args.survey_report)
-        except OSError as error:
-            print(f"保存自主识别记录失败：{error}")
+        if watch.autonomy is not None:
+            try:
+                watch.autonomy.save(args.survey_report)
+            except OSError as error:
+                print(f"保存自主识别记录失败：{error}")
         pipeline.stop()
         if can_stream is not None:
             can_stream.close()
@@ -732,6 +748,9 @@ def run_extend(args) -> list[str]:
 
 
 def run(args) -> list[str]:
+    if args.mode == "static":
+        from static_test import run_static
+        return run_static(args)
     if args.mode == "basic":
         return run_basic(args)
     return run_extend(args)
@@ -739,7 +758,7 @@ def run(args) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="识别四块建塔格的状态")
-    parser.add_argument("mode", choices=("basic", "extend"))
+    parser.add_argument("mode", choices=("basic", "extend", "static"))
     parser.add_argument("--pose-source", choices=("ssh", "local", "ros", "static"), default="ssh")
     parser.add_argument("--verify-motion", action="store_true", help="慢速验证：直接采用 CAN 右前角场地位姿并显示相对变化")
     parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
