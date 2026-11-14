@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import math
 import time
 
@@ -18,6 +18,8 @@ MIN_SAMPLES = 6
 MIN_AGREEMENT = 0.7
 MAX_FRAME_GAP = 1.5
 LOOK_SECONDS = 30.0
+NO_PROGRESS_SECONDS = 10.0
+STATION_RESET_M = 0.10
 PITCH_RECHECK_DEG = 4.0
 
 
@@ -80,6 +82,8 @@ class AutonomousSurvey:
         self.anchor = None
         self.anchor_pitch = None
         self.anchor_roll = None
+        self.station_pose = None
+        self.heading_centers = {}
         self.last_update = None
         self.message = "等待相机稳定"
         self.blocked_until = 0.0
@@ -99,6 +103,41 @@ class AutonomousSurvey:
         self.look_key = None
         self.anchor = None
         self.action = None
+        self.station_pose = None
+        self.heading_centers.clear()
+        self.attempts = {name: 0 for name in DISPLAY}
+
+    def _reset_station(self, pose):
+        self.station_pose = pose
+        self._freeze_headings(pose)
+        self.pitch_checks = {name: [] for name in DISPLAY}
+        self.attempts = {name: 0 for name in DISPLAY}
+        self.look_key = self.look_started = None
+        self.action = None
+        for evidence in self.evidence.values():
+            evidence.clear()
+
+    def _freeze_headings(self, pose):
+        self.heading_centers = {name: math.degrees(pose.yaw) - view.bearing_deg
+                                for name, view in self.watch.views.items()}
+
+    def heading_center(self, name):
+        if name not in self.heading_centers:
+            self.heading_centers[name] = (math.degrees(self.watch.last_pose.yaw)
+                                          - self.watch.views[name].bearing_deg)
+        return self.heading_centers[name]
+
+    def _aim(self, name):
+        watch = self.watch
+        center = self.heading_center(name)
+        bearing = math.degrees(watch.last_pose.yaw) - center
+        view = replace(watch.views[name], bearing_deg=bearing)
+        action = _aim_cell(name, view, watch.last_pose, watch.setup.center_to_corner,
+                           watch.pitch, True, watch.intr, self.attempts[name])
+        if action is not None and action.kind in ('yaw', 'pitch', 'wait'):
+            target = math.radians(center + GOAL_BEARING[action.attempt])
+            action = replace(action, yaw=math.atan2(math.sin(target), math.cos(target)))
+        return action
 
     def required_checks(self, name):
         cell = next(c for c in tower_cells() if c.name == name)
@@ -124,25 +163,42 @@ class AutonomousSurvey:
         now = self.clock()
         pose = watch.last_pose
         if self.last_update is not None and now-self.last_update > MAX_FRAME_GAP:
-            self.pause()
+            for evidence in self.evidence.values():
+                evidence.clear()
+            self.anchor = None
         self.last_update = now
+        if self.station_pose is None:
+            self.station_pose = pose
+            self._freeze_headings(pose)
+        if self.action is not None and self.action.kind == 'move':
+            if not watch._arrived(self.action) or watch.stable_frames < OBS_STABLE_FRAMES:
+                for evidence in self.evidence.values():
+                    evidence.clear()
+                self.message = '执行换点指令，到位稳定后重新扫描'
+                return
+            self._reset_station(pose)
+        distance = math.hypot(pose.x-self.station_pose.x, pose.y-self.station_pose.y)
+        if distance > STATION_RESET_M:
+            if watch.stable_frames < OBS_STABLE_FRAMES:
+                for evidence in self.evidence.values():
+                    evidence.clear()
+                self.message = '位置变化超过10厘米，停稳后重新扫描'
+                return
+            self._reset_station(pose)
         moved = (self.anchor is None or observation_moved(self.anchor, pose)
                  or abs(watch.pitch-self.anchor_pitch) > OBS_ANGLE_JITTER_DEG
                  or abs(watch.roll-self.anchor_roll) > OBS_ANGLE_JITTER_DEG)
         if moved:
-            translated = self.anchor is not None and math.hypot(pose.x-self.anchor.x, pose.y-self.anchor.y) > 0.02
-            if translated:
-                self.pitch_checks = {name: [] for name in DISPLAY}
-                self.attempts = {name: 0 for name in DISPLAY}
             self.anchor, self.anchor_pitch, self.anchor_roll = pose, watch.pitch, watch.roll
             for evidence in self.evidence.values():
                 evidence.clear()
-            self.look_started = None
-            self.look_key = None
         if not watch.have_color or watch.stable_frames < OBS_STABLE_FRAMES:
             for evidence in self.evidence.values():
                 evidence.clear()
             self.message = "等待相机稳定"
+            # 暂停证据采样，但同一观察档的失败时限仍然有效。
+            if self._expire_look(now):
+                self._schedule(now)
             return
         for name, view in watch.views.items():
             evidence = self.evidence[name]
@@ -203,9 +259,25 @@ class AutonomousSurvey:
             self.attempts[name] = 0
         self._schedule(now)
 
+    def _expire_look(self, now):
+        if self.look_key is None or self.look_started is None:
+            return False
+        name, attempt = self.look_key
+        elapsed = now - self.look_started
+        progress = self.evidence[name].windows
+        if elapsed < LOOK_SECONDS and (elapsed < NO_PROGRESS_SECONDS or progress > 0):
+            return False
+        self.attempts[name] = max(self.attempts[name], attempt + 1)
+        self._record(name, "observation_timeout", self.watch.views[name].conclusion, now)
+        self.evidence[name].clear()
+        self.look_key = self.look_started = None
+        self.action = None
+        return True
+
     def _schedule(self, now):
         watch = self.watch
         pose, offset, intr = watch.last_pose, watch.setup.center_to_corner, watch.intr
+        self._expire_look(now)
         if self.action is not None and self.action.cells and all(
             watch.votes[n].locked is not None and not watch.votes[n].recheck for n in self.action.cells
         ):
@@ -217,8 +289,6 @@ class AutonomousSurvey:
                 self.message = "执行观察指令，到位稳定后自动检测"
                 return
             self.action = None
-            self.look_key = None
-            self.look_started = None
         if self.primary_stops is None:
             self.primary_stops, self.primary_line = primary_route(pose,offset,intr)
         while self.primary_index < len(self.primary_stops):
@@ -236,15 +306,15 @@ class AutonomousSurvey:
         def turn_cost(name):
             if self.attempts[name] >= MAX_TRIES:
                 return math.inf
-            candidate = _aim_cell(name, watch.views[name], pose, offset, watch.pitch,
-                                  True, intr, self.attempts[name])
+            candidate = self._aim(name)
             if candidate is None:
                 return math.inf
             if candidate.yaw is None:
                 return 0.0
             return abs(math.degrees(math.atan2(math.sin(candidate.yaw-pose.yaw),
                                                math.cos(candidate.yaw-pose.yaw))))
-        active = self.action.cell if self.action is not None and self.action.kind == "wait" else None
+        active = self.look_key[0] if self.look_key is not None else (
+            self.action.cell if self.action is not None and self.action.kind == 'wait' else None)
         pending.sort(key=lambda n: (not watch.votes[n].recheck, n != active, turn_cost(n)))
         for name in pending:
             view = watch.views[name]
@@ -254,7 +324,7 @@ class AutonomousSurvey:
                     or fits_rgb_when_aimed(cells[name], pose, offset, intr)
                     or view.conclusion is not None and view.in_view):
                 continue
-            action = _aim_cell(name, view, pose, offset, watch.pitch, True, intr, self.attempts[name])
+            action = self._aim(name)
             if action is None:
                 self.attempts[name] = MAX_TRIES
                 continue
@@ -262,6 +332,8 @@ class AutonomousSurvey:
             if action.kind == "wait" and name in self.conflicts and not self._changed_view(self.conflicts[name]):
                 self.attempts[name] += 1
                 return self._schedule(now)
+            if self.look_key is not None and self.look_key != (name, action.attempt):
+                self.look_key = self.look_started = None
             self.action = action
             if action.kind == "wait":
                 key = (name, self.attempts[name])
@@ -269,12 +341,12 @@ class AutonomousSurvey:
                     self.look_key, self.look_started = key, now
                 progress = self.evidence[name].windows
                 self.message = f"{TOWER_NO[name]}号：俯仰复核{len(self.pitch_checks[name])}/{self.required_checks(name)}档；本档稳定{progress}/{CONFIRM_WINDOWS}段（每段至少{WINDOW_SECONDS:g}秒）"
-                if now-self.look_started >= LOOK_SECONDS and progress == 0:
-                    self.attempts[name] += 1
-                    self.look_key = self.look_started = None
-                    self.evidence[name].clear()
-                    self.action = None
-                    self._schedule(now)
+                if view.conclusion is None:
+                    reason = view.reason or "尚无通过校验的识别结果"
+                    rgb = (view.measurements or {}).get("rgb_cap")
+                    if rgb is not None:
+                        reason += f"；独立RGB顶块合格候选{rgb['candidates']}个（需唯一候选）"
+                    self.message += f"；{reason}；本档已等{now-self.look_started:.0f}秒，无进展{NO_PROGRESS_SECONDS:g}秒换档"
                 return
             self.message = f"原地调整{TOWER_NO[name]}号观察角度（{action.attempt+1}/{MAX_TRIES}）"
             return
@@ -364,7 +436,7 @@ class AutonomousSurvey:
             if action.kind == "pitch":
                 rows.append(f"相机{format_pitch(pitch)}，车身位置不动")
             if action.cell and action.kind != "move":
-                center = math.degrees(pose.yaw) - watch.views[action.cell].bearing_deg
+                center = self.heading_center(action.cell)
                 headings = '、'.join(heading_words(center+delta) for delta in dict.fromkeys(GOAL_BEARING))
                 rows.append(f"{TOWER_NO[action.cell]}号原地候选朝向：{headings}")
                 base_pitch = watch.views[action.cell].pitch_target_deg

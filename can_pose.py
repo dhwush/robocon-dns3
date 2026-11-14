@@ -14,7 +14,7 @@ from car_pose import CarPose
 
 # 仅使用 Python 标准库，远端无需安装 python-can 或 candump。
 CAN_SETUP = '''import json,os,subprocess,sys
-def setup_can(interface):
+def setup_can(interface, interactive=False):
  result = subprocess.run(['ip','-details','-json','link','show','dev',interface],
                          check=True,capture_output=True,text=True)
  links = json.loads(result.stdout)
@@ -30,7 +30,7 @@ def setup_can(interface):
      and data.get('state') not in ('BUS-OFF', 'STOPPED')):
   print('CAN ready: ' + interface + ' 1000000 bit/s (CAN1 Classic)', file=sys.stderr,flush=True)
   return
- prefix = [] if os.geteuid() == 0 else ['sudo','-n']
+ prefix = [] if os.geteuid() == 0 else (['sudo'] if interactive else ['sudo','-n'])
  for args in (['down'], ['type','can','bitrate','1000000'], ['up']):
   try:
    subprocess.run(prefix + ['ip','link','set','dev',interface] + args, check=True)
@@ -38,7 +38,9 @@ def setup_can(interface):
    raise RuntimeError('CAN setup failed. On the CAN host run: sudo ip link set dev '
                       + interface + ' down; sudo ip link set dev ' + interface
                       + ' type can bitrate 1000000; sudo ip link set dev ' + interface
-                      + ' up. Then reopen the camera. Automatic setup requires sudo -n permission.') from error
+                      + ' up. Then reopen the camera.'
+                      + (' Check sudo authentication and CAN interface errors.' if interactive
+                         else ' Automatic setup requires sudo -n permission.')) from error
  print('CAN configured: ' + interface + ' 1000000 bit/s (CAN1 Classic)', file=sys.stderr,flush=True)
 '''
 
@@ -93,8 +95,21 @@ class PoseDecoder:
 class CanPoseStream:
     def __init__(self, source='ssh', interface='can0', host='volleyball@192.168.3.194'):
         if source == 'ssh':
-            command = ['ssh', '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=2',
-                       '-o', 'ServerAliveCountMax=3', host,
+            ssh = ['ssh', '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=2',
+                   '-o', 'ServerAliveCountMax=3']
+            setup = CAN_SETUP + '\nsetup_can(sys.argv[1], interactive=True)\n'
+            print('正在初始化远端 CAN；如需认证，请在此终端输入 SSH / sudo 密码。',
+                  file=sys.stderr, flush=True)
+            try:
+                # 初始化继承终端输入输出；PTY 让远端 sudo 能正常询问密码。
+                # 读取另用无 PTY 的连接，避免提示或终端回显混入 CAN 帧。
+                subprocess.run(ssh + ['-t', host,
+                    'python3 -u -c ' + shlex.quote(setup) + ' ' + shlex.quote(interface)],
+                    check=True)
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError('SSH CAN 初始化失败，请查看终端中的连接、密码或接口错误；'
+                                   '修复后重新打开相机。') from error
+            command = ssh + [host,
                        'python3 -u -c ' + shlex.quote(READER) + ' ' + shlex.quote(interface)]
         else:
             command = [sys.executable, '-u', '-c', READER, interface]

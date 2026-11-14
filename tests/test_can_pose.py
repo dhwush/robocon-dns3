@@ -105,3 +105,59 @@ def test_can_corner_pose_moves_projection_without_center_offset():
     assert np.allclose(camera_position(start, offset, 0)[:2], [-0.211, 0.05])
     assert project(target, moved, offset, 0, intr)[0] < project(target, start, offset, 0, intr)[0]
     assert project(target, turned, offset, 0, intr)[0] > project(target, start, offset, 0, intr)[0]
+
+
+def test_interactive_can_setup_allows_sudo_password(monkeypatch):
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(stdout=json.dumps([{'linkinfo': {'info_kind': 'can'}}]))
+    monkeypatch.setattr(subprocess, 'run', run)
+    monkeypatch.setattr('os.geteuid', lambda: 1000)
+    namespace = {}
+    exec(CAN_SETUP, namespace)
+    namespace['setup_can']('can0', interactive=True)
+    assert len(calls) == 4
+    for command, kwargs in calls[1:]:
+        assert command[:2] == ['sudo', 'ip']
+        assert '-n' not in command
+        assert not kwargs.get('capture_output', False)
+        assert 'stdin' not in kwargs
+
+
+def test_ssh_setup_finishes_before_starting_can_reader(monkeypatch):
+    import io
+    import shlex
+    from can_pose import CanPoseStream
+    events = []
+    def run(command, **kwargs):
+        events.append(('setup', command, kwargs))
+    def popen(command, **kwargs):
+        events.append(('reader', command, kwargs))
+        return SimpleNamespace(stdout=io.StringIO(''), poll=lambda: 0)
+    monkeypatch.setattr(subprocess, 'run', run)
+    monkeypatch.setattr(subprocess, 'Popen', popen)
+    stream = CanPoseStream('ssh', 'can0', 'robot@example')
+    stream.close()
+    assert [e[0] for e in events] == ['setup', 'reader']
+    setup, reader = events
+    assert '-t' in setup[1]
+    assert '-t' not in reader[1]
+    assert setup[2] == {'check': True}
+    remote = shlex.split(setup[1][-1])
+    assert remote[:3] == ['python3', '-u', '-c']
+    assert 'interactive=True' in remote[3]
+    assert remote[4] == 'can0'
+    assert reader[2]['stdout'] == subprocess.PIPE
+
+
+def test_ssh_setup_failure_does_not_start_reader(monkeypatch):
+    from can_pose import CanPoseStream
+    def run(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command)
+    def popen(*args, **kwargs):
+        raise AssertionError('初始化失败后不能启动读取进程')
+    monkeypatch.setattr(subprocess, 'run', run)
+    monkeypatch.setattr(subprocess, 'Popen', popen)
+    with pytest.raises(RuntimeError, match='SSH CAN 初始化失败'):
+        CanPoseStream('ssh')

@@ -220,7 +220,7 @@ def live_panels(watch, pose, source, extras=()):
     action = None if survey is None else survey.action
     if action is not None and action.cell and action.kind != 'move':
         view = watch.views[action.cell]
-        center = np.degrees(pose.yaw) - view.bearing_deg
+        center = survey.heading_center(action.cell)
         headings = [heading_words(center+d) for d in dict.fromkeys(GOAL_BEARING)]
         left += [f"当前点：观察{TOWER_NO[action.cell]}号 · 第{action.attempt+1}/{MAX_TRIES}档",
                  '车头朝向：' + ' / '.join(headings[:4]),

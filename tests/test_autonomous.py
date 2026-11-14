@@ -139,6 +139,59 @@ def test_unknown_keeps_task_open_instead_of_finishing(monkeypatch):
     assert not any('最终结果' in line for line in survey.lines())
 
 
+def test_yaw_jitter_clears_evidence_without_restarting_attempt_timeout(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    started = survey.look_started
+    for yaw in (4., 0., 4., 0.):
+        watch.last_pose = CarPose(0, 0, math.radians(yaw))
+        observe(survey, clock, 2)
+        assert survey.look_started == started
+    observe(survey, clock, 2)
+    assert survey.attempts[name] == 1
+    assert survey.action.kind == 'pitch'
+    assert any(item['event'] == 'observation_timeout' for item in survey.history[name])
+
+
+def test_unstable_frames_do_not_restart_attempt_timeout(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    watch.stable_frames = 0
+    observe(survey, clock, autonomous.NO_PROGRESS_SECONDS + 1)
+    assert survey.attempts[name] == 1
+    assert watch.votes[name].locked is None
+
+
+def test_partial_progress_cannot_hold_same_attempt_forever(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    started = survey.look_started
+    # 有一个有效段，之后长期未知：允许延长观察，但仍有本档总时限。
+    survey.evidence[name].windows = 1
+    clock.now = started + autonomous.NO_PROGRESS_SECONDS + 1
+    survey.last_update = clock.now
+    survey._schedule(clock.now)
+    assert survey.attempts[name] == 0
+    clock.now = started + autonomous.LOOK_SECONDS + .1
+    survey._schedule(clock.now)
+    assert survey.attempts[name] == 1
+
+
+def test_frame_gap_preserves_attempt_deadline_but_discards_evidence(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    started = survey.look_started
+    clock.now += autonomous.NO_PROGRESS_SECONDS + 1
+    survey.update()
+    assert survey.attempts[name] == 1
+    assert survey.look_started is None
+    assert watch.votes[name].locked is None
+
+
 def test_final_summary_only_after_every_tower_has_no_conflict(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     for vote in watch.votes.values():
@@ -255,11 +308,90 @@ def test_pitch_disagreement_discards_old_evidence(monkeypatch):
 def test_pitch_candidates_do_not_accumulate_across_positions(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     observe(survey, clock, 7)
-    watch.last_pose = CarPose(.1,0,0)
+    watch.last_pose = CarPose(.11,0,0)
     watch.pitch = 8.
     observe(survey, clock, 7)
     assert watch.votes[name].locked is None
     assert len(survey.pitch_checks[name]) == 1
+
+
+def test_rotation_translation_preserves_scan_and_pitch_checks(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    survey.attempts[name] = 3
+    survey.pitch_checks[name] = [dict(result='蓝', pitch=0.)]
+    survey.evidence[name].windows = 1
+    survey.evidence[name].samples = ['蓝']
+    watch.last_pose = CarPose(.04, -.03, math.radians(8))
+    survey.update()
+    assert survey.attempts[name] == 3
+    assert survey.pitch_checks[name] == [dict(result='蓝', pitch=0.)]
+    assert survey.evidence[name].windows == 0
+    assert survey.station_pose == CarPose(0, 0, 0)
+
+
+def test_slow_translation_uses_fixed_station_origin_and_waits_for_stability(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    survey.attempts[name] = 3
+    survey.pitch_checks[name] = [dict(result='蓝', pitch=0.)]
+    for x in (.025, .05, .075, .10):
+        watch.last_pose = CarPose(x, 0, 0)
+        survey.update()
+        assert survey.attempts[name] == 3
+    watch.last_pose = CarPose(.11, 0, 0)
+    watch.stable_frames = 0
+    survey.update()
+    assert survey.attempts[name] == 3
+    watch.stable_frames = 3
+    survey.update()
+    assert survey.attempts[name] == 0
+    assert survey.pitch_checks[name] == []
+    assert survey.station_pose.x == .11
+
+
+def test_commanded_small_move_resets_only_after_arrival(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    survey.attempts[name] = 3
+    survey.pitch_checks[name] = [dict(result='蓝', pitch=0.)]
+    survey.action = Action('move', '', x=.05, y=0.)
+    watch._arrived = lambda action: watch.last_pose.x == .05
+    watch.last_pose = CarPose(.03, 0, 0)
+    survey.update()
+    assert survey.attempts[name] == 3
+    assert survey.evidence[name].samples == []
+    watch.last_pose = CarPose(.05, 0, 0)
+    watch.stable_frames = 0
+    survey.update()
+    assert survey.attempts[name] == 3
+    watch.stable_frames = 3
+    survey.update()
+    assert survey.attempts[name] == 0
+    assert survey.pitch_checks[name] == []
+
+
+def test_heading_targets_remain_fixed_despite_live_pose_changes(monkeypatch):
+    import motion
+    survey, watch, clock, name = make_survey(monkeypatch)
+    monkeypatch.setattr(autonomous, '_aim_cell', motion._aim_cell)
+    monkeypatch.setattr(motion, '_parking_clear', lambda *args: True)
+    monkeypatch.setattr(motion, '_sees', lambda *args: True)
+    watch.last_pose = CarPose(0, 0, math.radians(24.6))
+    watch.views[name].bearing_deg = 9.6
+    survey.attempts[name] = 3
+    action = survey._aim(name)
+    assert math.isclose(math.degrees(action.yaw), 23.)
+    watch.last_pose = CarPose(.04, -.03, math.radians(28.1))
+    watch.views[name].bearing_deg = 12.1
+    action = survey._aim(name)
+    assert math.isclose(math.degrees(action.yaw), 23.)
+    assert math.isclose(survey.heading_center(name), 15.)
+    # 搜索框用的实时视图没有被固定目标角度覆盖。
+    assert watch.views[name].bearing_deg == 12.1
 
 
 def test_window_shows_pitch_sequence_and_cross_check_progress(monkeypatch):
@@ -322,7 +454,8 @@ def test_point_can_be_useful_when_only_offset_yaw_is_visible(monkeypatch):
 def test_schedule_prefers_smaller_next_turn_and_preserves_active_observation(monkeypatch):
     survey, watch, clock, first = make_survey(monkeypatch)
     second = DISPLAY[1]
-    watch.views[second] = CellView(None,True,False,False,False,40.,0.,0.,255.)
+    watch.views[first].bearing_deg = -90.
+    watch.views[second] = CellView(None,True,False,False,False,-5.,0.,0.,255.)
     monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda cell,*args: cell.name in (first,second))
     def aim(name,*args):
         return Action('yaw','',cell=name,yaw=math.radians(90 if name == first else 5))
