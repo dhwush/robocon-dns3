@@ -13,7 +13,37 @@ from collections import deque
 from car_pose import CarPose
 
 # 仅使用 Python 标准库，远端无需安装 python-can 或 candump。
-READER = '''import socket,struct,sys
+CAN_SETUP = '''import json,os,subprocess,sys
+def setup_can(interface):
+ result = subprocess.run(['ip','-details','-json','link','show','dev',interface],
+                         check=True,capture_output=True,text=True)
+ links = json.loads(result.stdout)
+ if len(links) != 1:
+  raise RuntimeError('CAN interface not found: ' + interface)
+ link = links[0]
+ info = link.get('linkinfo', {})
+ if info.get('info_kind') != 'can':
+  raise RuntimeError('Not a CAN interface: ' + interface)
+ data = info.get('info_data', {})
+ if ('UP' in link.get('flags', [])
+     and data.get('bittiming', {}).get('bitrate') == 1000000
+     and data.get('state') not in ('BUS-OFF', 'STOPPED')):
+  print('CAN ready: ' + interface + ' 1000000 bit/s (CAN1 Classic)', file=sys.stderr,flush=True)
+  return
+ prefix = [] if os.geteuid() == 0 else ['sudo','-n']
+ for args in (['down'], ['type','can','bitrate','1000000'], ['up']):
+  try:
+   subprocess.run(prefix + ['ip','link','set','dev',interface] + args, check=True)
+  except subprocess.CalledProcessError as error:
+   raise RuntimeError('CAN setup failed. On the CAN host run: sudo ip link set dev '
+                      + interface + ' down; sudo ip link set dev ' + interface
+                      + ' type can bitrate 1000000; sudo ip link set dev ' + interface
+                      + ' up. Then reopen the camera. Automatic setup requires sudo -n permission.') from error
+ print('CAN configured: ' + interface + ' 1000000 bit/s (CAN1 Classic)', file=sys.stderr,flush=True)
+'''
+
+READER = CAN_SETUP + '''import socket,struct
+setup_can(sys.argv[1])
 s=socket.socket(socket.AF_CAN,socket.SOCK_RAW,socket.CAN_RAW)
 s.bind((sys.argv[1],))
 while True:
@@ -22,6 +52,16 @@ while True:
  if ident in (0xAA,0xAB) and size==8:
   print("%X %s"%(ident,payload.hex()),flush=True)
 '''
+
+
+def align_can_pose(raw: CarPose, raw_origin: CarPose, field_origin: CarPose) -> CarPose:
+    """用起始位姿建立 CAN 到场地的刚体变换，保留接收时间。"""
+    angle = field_origin.yaw - raw_origin.yaw
+    c, s = math.cos(angle), math.sin(angle)
+    dx, dy = raw.x - raw_origin.x, raw.y - raw_origin.y
+    yaw = math.atan2(math.sin(raw.yaw + angle), math.cos(raw.yaw + angle))
+    return CarPose(field_origin.x + c * dx - s * dy,
+                   field_origin.y + s * dx + c * dy, yaw, raw.stamp)
 
 
 class PoseDecoder:

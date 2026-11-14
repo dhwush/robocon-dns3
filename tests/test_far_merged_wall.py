@@ -1,4 +1,4 @@
-"""白盒粘墙时用塔顶和格内深度，不能靠白色连通域或单独彩色贴纸认塔。"""
+"""红蓝顶块独立判定：不依赖白盒和深度，但必须匹配塔位和上下关系。"""
 import json
 from pathlib import Path
 import runpy
@@ -39,22 +39,21 @@ def test_far_tower_merged_into_white_wall(upper,lower,expected):
     cell,pose,offset,intr,color,depth = merged_scene(upper,lower)
     view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
     assert view.conclusion == expected
-    assert view.method == '远处融合'
-    assert view.measurements['far_support']['support_points'] >= 30
+    assert view.method == 'RGB顶块'
 
 
-def test_color_on_distant_wall_without_own_white_depth_is_not_a_tower():
+def test_matching_rgb_cap_does_not_require_white_depth():
     cell,pose,offset,intr,color,depth = merged_scene()
     depth[:] = 8.
     view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
-    assert view.conclusion is None
-    assert view.measurements['far_support']['support_points'] == 0
+    assert view.conclusion == '红'
+    assert view.method == 'RGB顶块'
 
 
-def test_missing_depth_cannot_confirm_merged_wall_tower():
+def test_missing_depth_can_confirm_matching_rgb_cap():
     cell,pose,offset,intr,color,depth = merged_scene()
     view = inspect_frame(pose,offset,0.,intr,color,None)[cell.name]
-    assert view.conclusion is None
+    assert view.conclusion == '红'
 
 
 @pytest.mark.parametrize('filename',['20261111_043851_560037','20261111_043853_583125'])
@@ -68,4 +67,35 @@ def test_recorded_far_tower_with_red_upper_band(filename):
                            metadata['pitch_deg'],Intrinsics(**metadata['intrinsics']),
                            frame['color'],frame['depth'],metadata['roll_deg'])[metadata['selected']]
     assert view.conclusion == '红'
-    assert view.method == '远处融合'
+    assert view.method == 'RGB顶块'
+
+
+@pytest.mark.parametrize('kind', ['single', 'side_by_side', 'wrong_height', 'wrong_cell'])
+def test_rgb_cap_rejects_unrelated_colors(kind):
+    from classify import _rgb_cap_reading, _mask
+    from car_pose import to_camera
+    cell,pose,offset,intr,color,depth = merged_scene()
+    color[:] = 0
+    fill = M['_fill_plane']
+    x = cell.x + (1.0 if kind == 'wrong_cell' else 0.)
+    shift = -.40 if kind == 'wrong_height' else 0.
+    if kind == 'side_by_side':
+        for dx, bgr in [(-.05,(0,0,220)),(.05,(220,0,0))]:
+            fill(color,depth,pose,offset,0.,cell.y-.16,cell.two_z,cell.cap_z,bgr,x+dx,.05)
+    else:
+        fill(color,depth,pose,offset,0.,cell.y-.16,cell.two_z+shift,cell.two_z+.1+shift,(220,0,0),x,.10)
+        fill(color,depth,pose,offset,0.,cell.y-.16,cell.two_z+.1+shift,cell.cap_z+shift,
+             (220,0,0) if kind == 'single' else (0,0,220),x,.10)
+    mask = _mask(cell,pose,offset,0.,intr)
+    z = float(to_camera(cell.center(cell.one_z),pose,offset,0.)[2])
+    assert _rgb_cap_reading(cell,color,mask,pose,offset,0.,intr,z) is None
+
+
+@pytest.mark.parametrize('upper,lower,expected', [((0,0,220),(220,0,0),'红'), ((220,0,0),(0,0,220),'蓝')])
+def test_rgb_cap_with_no_visible_white_body(upper,lower,expected):
+    cell,pose,offset,intr,color,depth = merged_scene(upper,lower)
+    # 所有无色像素涂黑，模拟塔身被遮挡；只留下顶块。
+    color[np.max(color,axis=2) == np.min(color,axis=2)] = 0
+    view = inspect_frame(pose,offset,0.,intr,color,None)[cell.name]
+    assert view.conclusion == expected
+    assert view.method == 'RGB顶块'

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import math
 
-from car_pose import CarPose, Intrinsics, Setup, pose_moved
+from car_pose import (CarPose, Intrinsics, Setup, pose_moved, observation_moved,
+                      OBS_STABLE_FRAMES, OBS_ANGLE_JITTER_DEG)
 from classify import inspect_frame
 from field_map import DISPLAY, TOWER_NO
-from motion import MOVE_ARRIVE_M, ARRIVE_M, MAX_TRIES, format_pitch, place_done, plan_action
+from motion import PITCH_TOL_DEG, YAW_TOL_DEG, MOVE_ARRIVE_M, ARRIVE_M, MAX_TRIES, format_pitch, place_done, plan_action
 from vote import LOCK_FRAMES, WINDOW_FRAMES, Vote
 
 
@@ -164,6 +165,11 @@ class FieldWatch:
         self.stable_pitch = self.pitch
         self.stable_frames = 0
         self.parallax_origins = {}
+        self.autonomy = None
+
+    def enable_autonomy(self, clock=None):
+        from autonomous import AutonomousSurvey
+        self.autonomy = AutonomousSurvey(self) if clock is None else AutonomousSurvey(self, clock)
 
     def follow_pitch(self, measured: float | None) -> None:
         # 每帧用加速度计旋到彩色系之后的角度。读不到就留在上一帧。
@@ -172,6 +178,11 @@ class FieldWatch:
         self.pitch = float(measured)
 
     def required_pitch(self) -> float | None:
+        if self.autonomy is not None:
+            action = self.autonomy.action
+            if action is None:
+                return None
+            return action.pitch if action.pitch is not None else self.pitch
         # 正在执行的俯仰指令优先。否则用这一步那一格要对准的角度。
         if (
             self.hold is not None
@@ -228,8 +239,8 @@ class FieldWatch:
                 self.visited.append((self.last_pose.x, self.last_pose.y))
                 self.tries = {name: 0 for name in DISPLAY}
             self.barren = {name: 0 for name in DISPLAY}
-        if (self.stable_pose is None or pose_moved(self.stable_pose, pose)
-                or abs(self.pitch - self.stable_pitch) > 1.0):
+        if (self.stable_pose is None or observation_moved(self.stable_pose, pose)
+                or abs(self.pitch - self.stable_pitch) > OBS_ANGLE_JITTER_DEG):
             self.stable_pose = pose
             self.stable_pitch = self.pitch
             self.stable_frames = 0
@@ -261,16 +272,19 @@ class FieldWatch:
                     view.measurements["parallax_origin"] = self.parallax_origins[name]
                 if self.votes[name].locked is not None and not self.votes[name].recheck:
                     self.parallax_origins.pop(name,None)
-        if color is not None and self.stable_frames < 5:
+        if color is not None and self.stable_frames < OBS_STABLE_FRAMES:
             for view in self.views.values():
                 if view.conclusion is None and view.reason:
                     continue
-                view.reason = f"等待相机稳定：{self.stable_frames}/5帧"
+                view.reason = f"等待相机稳定：{self.stable_frames}/{OBS_STABLE_FRAMES}帧"
         frac = max((view.white_frac for view in self.views.values()), default=0.0)
         mean_v = min((view.mean_v for view in self.views.values()), default=255.0)
         if color is not None and not self.light_hand:
             self.light, self.light_wait = step_light(self.light, frac, mean_v, self.light_wait)
-        if color is not None and self.stable_frames >= 5:
+        if self.autonomy is not None:
+            self.autonomy.update()
+            return
+        if color is not None and self.stable_frames >= OBS_STABLE_FRAMES:
             for name, view in self.views.items():
                 if view.skip_vote:
                     continue
@@ -286,6 +300,8 @@ class FieldWatch:
     def lines(self, mode: str) -> list[str]:
         if not self.setup.ready or self.views is None or self.last_pose is None or self.setup.center_to_corner is None:
             return ["车位还没对齐"]
+        if self.autonomy is not None:
+            return self.autonomy.lines()
         locked = {name: vote.locked for name, vote in self.votes.items()}
         if mode == "basic":
             rows = []
@@ -326,6 +342,8 @@ class FieldWatch:
         return rows
 
     def window_lines(self, mode: str) -> list[str]:
+        if self.autonomy is not None:
+            return [light_hint(self.light)] + self.lines(mode)
         official = self.lines(mode)
         hint = light_hint(self.light)
         if official == ["车位还没对齐"]:
@@ -339,7 +357,7 @@ class FieldWatch:
             text = plain_state(view, locked[name], mode)
             if (
                 locked[name] is None and view.conclusion is not None
-                and self.stable_frames >= 5
+                and self.stable_frames >= OBS_STABLE_FRAMES
             ):
                 text += f"；最近{WINDOW_FRAMES}帧内同结论{vote.count}/{LOCK_FRAMES}帧"
             if vote.recheck:
@@ -438,10 +456,10 @@ class FieldWatch:
         if pose is None:
             return False
         if hold.kind == "pitch":
-            return abs(self.pitch - float(hold.pitch)) <= 1.0
+            return abs(self.pitch - float(hold.pitch)) <= PITCH_TOL_DEG
         if hold.kind == "yaw":
             turn = math.atan2(math.sin(pose.yaw - float(hold.yaw)), math.cos(pose.yaw - float(hold.yaw)))
-            return abs(math.degrees(turn)) <= 1.0
+            return abs(math.degrees(turn)) <= YAW_TOL_DEG
         if hold.kind == "move":
             return math.hypot(pose.x - float(hold.x), pose.y - float(hold.y)) <= MOVE_ARRIVE_M
         return True

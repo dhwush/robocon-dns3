@@ -125,6 +125,20 @@ def pose_moved(previous: CarPose | None, current: CarPose) -> bool:
     return bool(step > JITTER_M or turn > JITTER_YAW)
 
 
+# 观察稳定性与导航运动检测分开：小幅定位/姿态抖动不清空识别证据。
+OBS_STABLE_FRAMES = 3
+OBS_ANGLE_JITTER_DEG = 3.0
+
+
+def observation_moved(previous: CarPose | None, current: CarPose) -> bool:
+    if previous is None:
+        return True
+    step = float(np.hypot(current.x-previous.x, current.y-previous.y))
+    turn = abs(float(np.degrees(np.arctan2(np.sin(current.yaw-previous.yaw),
+                                          np.cos(current.yaw-previous.yaw)))))
+    return bool(step > .03 or turn > OBS_ANGLE_JITTER_DEG)
+
+
 def _axes(yaw: float, pitch_deg: float, roll_deg: float = 0.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     # 航向为正是向左转。俯仰为正是抬头。横滚为正是右侧向下。相机 Y 轴朝下。
     yaw_c, yaw_s = float(np.cos(yaw)), float(np.sin(yaw))

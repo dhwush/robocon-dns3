@@ -11,7 +11,8 @@
 3 m 以内仍要直边；轮廓不整齐时只靠深度写层数。
 偏黄的地板从白掩膜里拿掉，白盒正面留着。层数仍看剩下的白块。
 框里的白被切碎，或只剩不够 15 cm 的一截，同样保持未知，不写成空。
-三层塔的阵营看贴在白盒顶上的像素带，从上往下认。和顶边隔开的红蓝不算。分不出先后就保持未知，不写成两层。
+三层塔优先独立识别对应塔位和高度的红蓝顶块，不要求白盒或深度支撑。
+独立顶块不成立时，仍可看贴在白盒顶上的像素带；分不出先后保持未知。
 0.3 m 到 3 m 里，挡在格子近面前面、又落在这块塔的画面里的箱子和杂物不写成塔，也不写成空。
 像方块、但深度不在台心 50 cm 里的白块同样丢掉。
 """
@@ -948,6 +949,66 @@ def _color_reading(
     return (faction if faction is not None else "2", piece, distance)
 
 
+def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
+                     roll=0.0, diagnostic=None):
+    """顶块独立提供阵营证据；白盒遮挡、粘连和缺失深度不否定它。"""
+    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
+    red = (cv2.inRange(hsv, np.array(RED[0]), np.array(RED[1]))
+           | cv2.inRange(hsv, np.array(RED_WRAP[0]), np.array(RED_WRAP[1]))) > 0
+    blue = cv2.inRange(hsv, np.array(BLUE[0]), np.array(BLUE[1])) > 0
+    radius = max(1, min(3, int(round(.015 * intr.fy / z_cam))))
+    colored = (red | blue).astype(np.uint8)
+    closed = cv2.morphologyEx(colored, cv2.MORPH_CLOSE,
+                             np.ones((2*radius+1, 2*radius+1), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
+    candidates = []
+    for index in range(1, count):
+        x, y, w, h, pixels = stats[index]
+        if pixels < 12 or x <= 1 or y <= 1 or x+w >= intr.width-1 or y+h >= intr.height-1:
+            continue
+        if not (.08 <= _metric(w, z_cam, intr.fx) <= .34
+                and .14 <= _metric(h, z_cam, intr.fy) <= .28
+                and pixels >= .45*w*h):
+            continue
+        part = labels == index
+        if np.count_nonzero(part & (mask > 0)) < .9*pixels:
+            continue
+        py, px = np.nonzero(part)
+        cols = np.unique(px)
+        low = [py[px == col].max()+1 for col in cols]
+        high = [py[px == col].min() for col in cols]
+        bottom_z = [_z_at_cell(cell, col, row, pose, offset, pitch, intr, roll)
+                    for col, row in zip(cols, low)]
+        top_z = [_z_at_cell(cell, col, row, pose, offset, pitch, intr, roll)
+                 for col, row in zip(cols, high)]
+        if any(v is None for v in bottom_z+top_z):
+            continue
+        if (abs(float(np.median(bottom_z))-cell.two_z) > .12
+                or abs(float(np.median(top_z))-cell.cap_z) > .15):
+            continue
+        # 两色必须都占据有效面积，且上下分开；并排贴纸不能决定朝上颜色。
+        ry, rx = np.nonzero(red & part)
+        by, bx = np.nonzero(blue & part)
+        need = max(8, int(.10*pixels))
+        if len(ry) < need or len(by) < need:
+            continue
+        overlap = min(rx.max(), bx.max()) - max(rx.min(), bx.min()) + 1
+        if overlap < .5 * min(rx.max()-rx.min()+1, bx.max()-bx.min()+1):
+            continue
+        red_above = np.percentile(ry, 75) < np.percentile(by, 25)
+        blue_above = np.percentile(by, 75) < np.percentile(ry, 25)
+        if not (red_above or blue_above):
+            continue
+        candidates.append(('红' if red_above else '蓝', part))
+    if diagnostic is not None:
+        diagnostic['rgb_cap'] = {'candidates': len(candidates),
+                                 'reason': '位置和高度匹配的独立红蓝顶块'}
+    if len(candidates) != 1:
+        return None
+    faction, part = candidates[0]
+    return faction, _outline(part.astype(np.uint8)*255)
+
+
 def _far_cap_reading(cell, color, white, depth, mask, pose, offset, pitch,
                      intr, z_cam, roll=0.0, diagnostic=None):
     """远处白盒粘墙时，用塔顶定位，再用格内深度分离白盒；不量整片白墙。"""
@@ -1277,6 +1338,12 @@ def _classify_cell(
     cam = to_camera(cell.center(cell.one_z), pose, offset, pitch, roll)
     z_cam = float(cam[2])
     color_usable = in_view and z_cam > 0.2
+    if color_usable:
+        rgb_cap = _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr,
+                                   z_cam, roll, diagnostic)
+        if rgb_cap is not None:
+            state, piece = rgb_cap
+            return pack(state, frac, mean_v, piece, "RGB顶块")
     clipped = False
     overwide = False
     missed_shape = False

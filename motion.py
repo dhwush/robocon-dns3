@@ -23,11 +23,14 @@ from sight import visible_height
 
 # 正中：方位和目标俯仰都进到这个范围里，才开始记这一格。
 CENTER_DEG = 5.0
-PITCH_TOL_DEG = 1.0
-# 正中看了还没有结论，就换俯仰、再偏一个角度。五个视角轮流看，不因此改去平移。
-MAX_TRIES = 5
-PITCH_OFFSET = (0.0, 8.0, -8.0, 0.0, 0.0)
-GOAL_BEARING = (0.0, 0.0, 0.0, 15.0, -15.0)
+PITCH_TOL_DEG = 5.0
+# 每个航向都测基准、抬高8度和降低8度；共21个姿态。
+YAW_TOL_DEG = 3.0
+SCAN_YAWS = (0.0, 8.0, -8.0, 16.0, -16.0, 24.0, -24.0)
+SCAN_PITCHES = (0.0, 8.0, -8.0)
+GOAL_BEARING = tuple(yaw for yaw in SCAN_YAWS for _ in SCAN_PITCHES)
+PITCH_OFFSET = SCAN_PITCHES * len(SCAN_YAWS)
+MAX_TRIES = len(GOAL_BEARING)
 # 深度相机大约 0.3 m 到 3 m。落点要落在这段里。
 DEPTH_NEAR_M = 0.3
 DEPTH_FAR_M = 3.0
@@ -67,6 +70,14 @@ class Action:
     final_y: float | None = None
     chase_to: str | None = None
     cells: tuple[str, ...] = ()
+
+
+def heading_words(degrees: float) -> str:
+    """场地绝对朝向，避免把目标朝向误读成增量转角。"""
+    value = (degrees + 180.0) % 360.0 - 180.0
+    if abs(value) < .5:
+        return "正前方0°"
+    return f"{'左' if value > 0 else '右'}{abs(value):.0f}°"
 
 
 def format_yaw(bearing_deg_value: float) -> str:
@@ -126,17 +137,31 @@ def place_done(locked: dict[str, str | None], pose: CarPose, offset: np.ndarray,
     return True
 
 
+def observation_poses(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics):
+    """与原地扫描相同的姿态集合；索引对应执行器的attempt。"""
+    centered = aimed_pose(pose, offset, cell)
+    for index, (goal, delta_pitch) in enumerate(zip(GOAL_BEARING, PITCH_OFFSET)):
+        faced = turned_pose(pose, centered.yaw + math.radians(goal))
+        # 相机不在旋转中心，偏航时需重新求目标方位。
+        for _ in range(10):
+            error = _wrap(bearing_deg(cell.center(cell.one_z), faced, offset)-goal)
+            if abs(error) < .01:
+                break
+            faced = turned_pose(pose, faced.yaw-math.radians(error))
+        pitch = _pitch_target(cell, faced, offset) + delta_pitch
+        if not _parking_clear(faced.x, faced.y, faced.yaw):
+            continue
+        if not _sees(cell, faced, offset, pitch, intr):
+            continue
+        if visible_height(faced, offset, pitch, cell, cell.base_z, cell.one_z) < MIN_VISIBLE_M:
+            continue
+        slant = _slant(cell, camera_position(faced, offset, 0.0))
+        if DEPTH_NEAR_M <= slant <= DEPTH_FAR_M:
+            yield index, faced, pitch
+
+
 def fits_when_aimed(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics) -> bool:
-    # 转到正中、俯仰对准一层顶和塔顶的中点之后，还要看得见、让得开、落在深度里。
-    faced = aimed_pose(pose, offset, cell)
-    pitch = _pitch_target(cell, faced, offset)
-    in_view, needs_yaw, needs_pitch = _view_flags(cell, faced, offset, pitch, intr)
-    if not in_view or needs_yaw or needs_pitch:
-        return False
-    if visible_height(faced, offset, pitch, cell, cell.base_z, cell.one_z) < MIN_VISIBLE_M:
-        return False
-    slant = _slant(cell, camera_position(faced, offset, 0.0))
-    return DEPTH_NEAR_M <= slant <= DEPTH_FAR_M
+    return next(observation_poses(cell, pose, offset, intr), None) is not None
 
 
 def _near_visited(x: float, y: float, visited: list[tuple[float, float]]) -> bool:
@@ -347,16 +372,29 @@ def _fallback(pose: CarPose, need: list[str], visited: list[tuple[float, float]]
 
 
 def _looks(pose: CarPose, offset: np.ndarray, intr: Intrinsics, names: list[str] | tuple[str, ...]) -> tuple[Look, ...]:
-    # 每一格转到正中的航向，俯仰对准一层顶和塔顶的中点。
+    # Look保留每塔一个基准姿态，供地图展开偏航/俯仰列表；
+    # 任务顺序按该塔最近的可用姿态计算，避免界面重复展开全部姿态。
     cells = _cells()
-    rows = []
+    remaining = []
     for name in names:
         cell = cells[name]
-        faced = aimed_pose(pose, offset, cell)
-        pitch = _pitch_target(cell, faced, offset)
-        rows.append(Look(TOWER_NO[name], float(np.degrees(faced.yaw)), float(pitch)))
-    rows.sort(key=lambda item: item.number)
-    return tuple(rows)
+        poses = tuple(observation_poses(cell, pose, offset, intr))
+        if not poses:
+            continue
+        centered = aimed_pose(pose, offset, cell)
+        base = Look(TOWER_NO[name], math.degrees(centered.yaw),
+                    _pitch_target(cell, centered, offset))
+        remaining.append((base, poses))
+    ordered = []
+    yaw = math.degrees(pose.yaw)
+    while remaining:
+        task, first = min(((task, min(task[1], key=lambda p: abs(_wrap(math.degrees(p[1].yaw)-yaw))))
+                           for task in remaining),
+                          key=lambda pair: abs(_wrap(math.degrees(pair[1][1].yaw)-yaw)))
+        remaining.remove(task)
+        ordered.append(task[0])
+        yaw = math.degrees(first[1].yaw)
+    return tuple(ordered)
 
 
 def _different_view(cell, origin, candidate):
@@ -705,16 +743,19 @@ def _aim_cell(
     intr: Intrinsics | None,
     attempt_index: int,
 ) -> Action | None:
-    # 五个视角轮流用。某一档会把格子推出画面就跳过，转完仍从正中接着看，不改去平移。
+    # 按剩余姿态依次尝试；出画的姿态跳过，不回到已经尝试的角度。
     cells = _cells()
     cell = cells[name]
-    start = attempt_index % MAX_TRIES
-    order = list(range(start, MAX_TRIES)) + list(range(start))
+    order = range(attempt_index, MAX_TRIES)
     for index in order:
         goal = GOAL_BEARING[index]
-        if abs(_wrap(view.bearing_deg - goal)) > CENTER_DEG:
-            return _turn_action(pose, name, view.bearing_deg - goal, index)
+        turn = _wrap(view.bearing_deg - goal)
         goal_pitch = view.pitch_target_deg + PITCH_OFFSET[index]
+        faced = turned_pose(pose, pose.yaw - math.radians(turn))
+        if intr is not None and not _sees(cell, faced, offset, goal_pitch, intr):
+            continue
+        if abs(turn) > YAW_TOL_DEG:
+            return _turn_action(pose, name, turn, index)
         if abs(goal_pitch - pitch) > PITCH_TOL_DEG:
             if intr is not None and not _sees(cell, pose, offset, goal_pitch, intr):
                 continue
@@ -766,8 +807,8 @@ def plan_action(
         return int(attempt.get(name, 0))
 
     def can_aim(name: str) -> bool:
-        # 五个视角用完就不再守在这里。两层或塔顶还没锁定时，视角没用完就继续对正。
-        if attempt_of(name) >= MAX_TRIES or name in parallax:
+        # 原地姿态用完才换位；需要视差也先尝试剩余姿态。
+        if attempt_of(name) >= MAX_TRIES:
             return False
         if views[name].method == "远处白盒" and views[name].conclusion in ("1", "2"):
             return True
@@ -872,3 +913,61 @@ def next_action(
     if action is None or action.kind == "wait":
         return None
     return action.text
+
+
+def nearest_observation(pose, offset, intr, need, exhausted=None, references=None):
+    """按每座可覆盖塔的绕障路程选点，同分优先姿态丰富、转向少的点。"""
+    exhausted, references = exhausted or {}, references or {}
+    cells = _cells()
+    candidates = set()
+    # 加密当前位置附近，避免仅有绕塔大半径候选时过度移动。
+    for radius in (0.10, 0.20, 0.30, 0.40, 0.50, 0.65, 0.80, 1.0, 1.2):
+        for degrees in range(0, 360, 15):
+            angle = math.radians(degrees)
+            candidates.add((pose.x+radius*math.cos(angle), pose.y+radius*math.sin(angle)))
+    for name in need:
+        cell = cells[name]
+        for distance in _distances(cell, intr):
+            for degrees in range(0, 360, 15):
+                angle = math.radians(degrees)
+                stood = _pose_for_camera(pose, offset, cell.x+distance*math.cos(angle),
+                                         cell.y+distance*math.sin(angle))
+                candidates.add((stood.x, stood.y))
+    extras = _bypass_points(pose.yaw)
+    best = None
+    for x, y in sorted(candidates, key=lambda p: math.hypot(p[0]-pose.x, p[1]-pose.y)):
+        direct = math.hypot(x-pose.x, y-pose.y)
+        if best is not None and direct/max(1, len(need)) > best[0]+1e-6:
+            break
+        if direct < MOVE_ARRIVE_M or not _parking_clear(x, y, pose.yaw):
+            continue
+        stood = CarPose(x, y, pose.yaw, pose.stamp)
+        cam = camera_position(stood, offset, 0.)
+        if _ground_blocked(float(cam[0]), float(cam[1])):
+            continue
+        profiles = {}
+        for name in need:
+            if any(math.hypot(x-ex, y-ey)<0.08 for ex,ey in exhausted.get(name, [])):
+                continue
+            if name in references and not _different_view(cells[name], references[name], cam):
+                continue
+            poses = tuple(observation_poses(cells[name], stood, offset, intr))
+            if poses:
+                profiles[name] = poses
+        useful = tuple(profiles)
+        if not useful:
+            continue
+        trip = _travel(pose.x, pose.y, x, y, extras, pose.yaw)
+        if trip is None:
+            continue
+        # 路程/覆盖塔数避免只贪最近单塔；姿态数量只作同成本时的偏好。
+        turn = min(abs(_wrap(math.degrees(faced.yaw-pose.yaw)))
+                   for poses in profiles.values() for _, faced, _ in poses)
+        rank = (trip[0]/len(useful), -len(useful),
+                -sum(len(poses) for poses in profiles.values()), turn, trip[0])
+        if best is None or rank < best[:5]:
+            best = (*rank, x, y, trip[1], useful)
+    if best is None:
+        return Action("blocked", "没有安全有效的观察点，保留待确认任务")
+    _, _, _, _, _, x, y, line, useful = best
+    return _move_toward(pose, x, y, line, "fresh", useful) or Action("blocked", "保持原位等待有效观察条件")

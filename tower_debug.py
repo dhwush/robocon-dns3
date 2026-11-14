@@ -107,6 +107,9 @@ def paint_diagnostics(color, depth, views, selected=0, locked=None):
         ['对齐深度：固定0.3–3m；黑=无效；超范围饱和显示', stats,
          f"紫点=最高深度切片，离地高={measure.get('depth_height_cm', 0):.1f}cm" if points else '本帧无最高深度切片'],
     ]
+    rgb_cap = measure.get('rgb_cap') or {}
+    if rgb_cap:
+        descriptions[2].append(f"独立RGB顶块：合格候选{rgb_cap['candidates']}个；位置/高度/两色上下关系核验")
     if far_support:
         descriptions[3].append('远处融合：' + far_support.get('reason', ''))
         if 'width_cm' in far_support:

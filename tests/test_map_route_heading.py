@@ -41,8 +41,8 @@ def test_second_stop_keeps_turn_when_target_heading_is_zero():
     select_route_stop(view, stops, 1, math.radians(63))
     assert view['auto_yaw'] == '0.0'
     text = '\n'.join(stop_lines(stops,1,view['look'],view['arrival_yaw']))
-    assert '需向右转 63 度' in text
-    assert '朝向 向左 0 度' in text
+    assert '向右转 63 度' in text
+    assert '先朝正前方0°' in text
 
 
 def test_repeated_click_uses_previous_heading_and_wraps_short_turn():
@@ -52,7 +52,7 @@ def test_repeated_click_uses_previous_heading_and_wraps_short_turn():
     stops = [RouteStop(0,0,(Look('1',170.,0.),Look('2',-170.,0.)))]
     view = {'pinned':True,'arrived':0,'look':0}
     select_route_stop(view,stops,0,math.radians(170))
-    assert '需向左转 20 度' in '\n'.join(stop_lines(stops,0,view['look'],view['arrival_yaw']))
+    assert '向左转 20 度' in '\n'.join(stop_lines(stops,0,view['look'],view['arrival_yaw']))
 
 
 def test_history_migrates_optical_points_once(tmp_path):
@@ -87,4 +87,14 @@ def test_camera_entry_preserves_corner_in_all_modes(monkeypatch):
         for heading in (0, 63, 90, 180, -135):
             yaw = math.radians(heading)
             map_test._open_camera(1.2, .4, yaw, 0, SimpleNamespace(pose_source=mode))
-            assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, yaw)
+            assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, 0.0 if mode in ('ssh', 'local') else yaw)
+
+
+def test_station_panel_lists_all_scan_headings_without_claiming_completion():
+    from map_test import stop_lines
+    from motion import RouteStop, Look
+    text = '\n'.join(stop_lines([RouteStop(0,0,(Look('1',62.,-1.),))],0))
+    assert '左62°、左70°、左54°、左78°、左46°、左86°、左38°' in text
+    assert '相机低头到 1 度' in text
+    assert '完成识别' not in text
+    assert '不是每次再转这么多' in text

@@ -22,6 +22,7 @@ import numpy as np
 
 from car_pose import (
     CarPose,
+    Intrinsics,
     basic_origin_setup,
     closest_pose,
     load_intrinsics,
@@ -193,7 +194,54 @@ def _wrap(draw, text: str, font, width: int) -> list[str]:
     return rows
 
 
-def paint_window(color, views, locked: dict, texts: list[str]):
+def can_pose_text(pose: CarPose | None, source: str) -> str:
+    label = "SSH CAN" if source == "ssh" else "CAN"
+    if pose is None:
+        return f"{label} 等待位姿 / 数据超时：x=-- m  y=-- m  yaw=--°"
+    label += " 已校准场地位姿"
+    age = max(0.0, time.monotonic() - pose.stamp) * 1000
+    return (f"{label} 当前右前角：x={pose.x:+.3f} m  y={pose.y:+.3f} m  "
+            f"yaw={np.degrees(pose.yaw):+.1f}°  数据年龄={age:.0f} ms")
+
+
+def live_panels(watch, pose, source, extras=()):
+    """窗口三分区：操作目标/CAN、结果、其余状态。"""
+    from motion import GOAL_BEARING, MAX_TRIES, heading_words, format_pitch
+    left = [can_pose_text(pose, source), f"当前相机：{format_pitch(watch.pitch)}"]
+    right = ["识别结果"]
+    words = {'0': '空', '1': '一层', '2': '两层', '红': '红顶', '蓝': '蓝顶'}
+    for name in sorted(watch.votes, key=lambda n: TOWER_NO[n]):
+        vote = watch.votes[name]
+        current = watch.views[name].conclusion
+        status = '待复核' if vote.recheck else '已确认' if vote.locked is not None else '检测中'
+        value = vote.locked if vote.locked is not None else current
+        right.append(f"{TOWER_NO[name]}号  {words.get(value, '未知')}  {status}")
+    survey = watch.autonomy
+    action = None if survey is None else survey.action
+    if action is not None and action.cell and action.kind != 'move':
+        view = watch.views[action.cell]
+        center = np.degrees(pose.yaw) - view.bearing_deg
+        headings = [heading_words(center+d) for d in dict.fromkeys(GOAL_BEARING)]
+        left += [f"当前点：观察{TOWER_NO[action.cell]}号 · 第{action.attempt+1}/{MAX_TRIES}档",
+                 '车头朝向：' + ' / '.join(headings[:4]),
+                 '                 ' + ' / '.join(headings[4:]),
+                 '相机俯仰：' + ' / '.join(format_pitch(view.pitch_target_deg+d) for d in (0.,8.,-8.))]
+        from motion import PITCH_OFFSET
+        yaw = action.yaw if action.yaw is not None else pose.yaw
+        target_pitch = view.pitch_target_deg + PITCH_OFFSET[action.attempt]
+        left.append(f"本档目标：{heading_words(np.degrees(yaw))} · {format_pitch(target_pitch)}")
+        left.append(f"俯仰复核：{len(survey.pitch_checks[action.cell])}/2档")
+    elif action is not None and action.kind == 'move':
+        left.append(f"下一点：x={action.x:+.2f}m y={action.y:+.2f}m")
+    else:
+        left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
+    bottom = ([survey.message] if survey is not None else []) + list(extras)
+    bottom += ["朝向以场地前方为0°；停稳测量，两档俯仰一致才确认",
+               "1–5 光线 | d 诊断 | n 切换塔 | s 保存 | q 退出"]
+    return dict(left=left, right=right, bottom=bottom)
+
+
+def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool = False, panels=None):
     # 格子轮廓标出在看哪一块。认到白盒后再沿白盒描一圈，并在旁边写短词。
     import cv2
     from PIL import Image, ImageDraw, ImageFont
@@ -206,6 +254,12 @@ def paint_window(color, views, locked: dict, texts: list[str]):
             bgr = _MARK.get(state, (0, 220, 255))
             if view.region is not None:
                 cv2.drawContours(board, [view.region], -1, bgr, 2, cv2.LINE_AA)
+                if show_boxes:
+                    # 搜索区域由当前位姿投影得到；不依赖分类成功或投票锁定。
+                    x, y, width, height = cv2.boundingRect(view.region)
+                    cv2.rectangle(board, (x, y), (x + width - 1, y + height - 1), bgr, 2)
+                    tags.append((max(0, x), max(0, y - 24),
+                                 f"{TOWER_NO[name]} 搜索框", bgr))
             if view.piece is not None:
                 cv2.drawContours(board, [view.piece], -1, bgr, 2, cv2.LINE_AA)
             measure = getattr(view, "measurements", None) or {}
@@ -234,15 +288,38 @@ def paint_window(color, views, locked: dict, texts: list[str]):
     font = ImageFont.truetype(_FONT, _FONT_SIZE)
     panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(panel)
-    limit = max(board.shape[1] - 16, 40)
-    y = 6
-    for line in texts:
-        for row in _wrap(draw, line, font, limit):
-            draw.text((8, y), row, font=font, fill=(255, 255, 255), stroke_width=1, stroke_fill=(0, 0, 0))
-            y += _FONT_SIZE + 4
+    # 标记先画，说明文字直接叠加到画面，不绘制背景底板。
     for u, v, text, bgr in tags:
         rgb = (bgr[2], bgr[1], bgr[0])
         draw.text((u, v), text, font=font, fill=rgb, stroke_width=1, stroke_fill=(0, 0, 0))
+    if panels is None:
+        panels = dict(left=texts, right=[], bottom=[])
+    width, height = panel.size
+    gap = 8
+    right_width = min(240, width//3)
+    left_width = width-right_width-3*gap
+    line_height = _FONT_SIZE+4
+
+    def block(lines, x, y, available, max_height, bottom=False):
+        rows = [row for line in lines for row in _wrap(draw, line, font, max(20,available-16))]
+        rows = rows[:max(0, (max_height-8)//line_height)]
+        if not rows:
+            return
+        box_height = len(rows)*line_height+8
+        if bottom:
+            y = height-gap-box_height
+        for row in rows:
+            draw.text((x+8,y+4), row, font=font, fill=(245,245,245),
+                      stroke_width=1, stroke_fill=(0,0,0))
+            y += line_height
+
+    bottom_lines = panels.get('bottom', [])
+    bottom_rows = sum(len(_wrap(draw,line,font,max(20,width-32))) for line in bottom_lines)
+    footer_height = min(height//3, bottom_rows*line_height+8) if bottom_rows else 0
+    top_height = height-footer_height-3*gap
+    block(panels.get('left', []), gap, gap, left_width, top_height)
+    block(panels.get('right', []), width-right_width-gap, gap, right_width, top_height)
+    block(bottom_lines, gap, 0, width-2*gap, footer_height, bottom=True)
     board[:] = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
     return board
 
@@ -279,6 +356,25 @@ def _accel_rotation(profile, rs) -> np.ndarray | None:
         return np.array(ext.rotation, dtype=float).reshape(3, 3)
     except Exception:
         return None
+
+
+def _camera_calibration(profile, rs):
+    """读取实际启动的彩色流标定；对齐到彩色的深度也使用这组内参。"""
+    raw = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+    intr = Intrinsics(int(raw.width), int(raw.height), float(raw.fx), float(raw.fy),
+                      float(raw.ppx), float(raw.ppy))
+    values = (intr.fx, intr.fy, intr.cx, intr.cy)
+    if (intr.width <= 0 or intr.height <= 0 or not np.all(np.isfinite(values))
+            or intr.fx <= 0 or intr.fy <= 0):
+        raise ValueError("相机返回的彩色内参无效")
+    device = profile.get_device()
+    metadata = {
+        "serial_number": device.get_info(rs.camera_info.serial_number),
+        "distortion_model": str(raw.model),
+        "distortion_coefficients": [float(value) for value in raw.coeffs],
+        "intrinsics_source": "realsense_color_stream",
+    }
+    return intr, metadata
 
 
 def _open_camera(rs):
@@ -348,6 +444,11 @@ def _open_camera(rs):
         pipeline = rs.pipeline()
         config.disable_stream(rs.stream.accel)
         profile = pipeline.start(config, on_frame)
+    try:
+        pending["intrinsics"], pending["camera"] = _camera_calibration(profile, rs)
+    except Exception:
+        pipeline.stop()
+        raise
     for device_sensor in profile.get_device().query_sensors():
         if device_sensor.supports(rs.option.global_time_enabled):
             device_sensor.set_option(rs.option.global_time_enabled, 1)
@@ -368,17 +469,34 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         print("没有接上相机")
         return lines
     source = getattr(args, "pose_source", "ssh")
+    if source in ("ssh", "local"):
+        # CAN 两种入口起始实际朝向固定为场地0度，观测角度只是后续转向目标。
+        pose = CarPose(pose.x, pose.y, 0.0, pose.stamp)
     verify_motion = getattr(args, "verify_motion", False)
-    if verify_motion and source in ("ssh", "local"):
+    if source in ("ssh", "local"):
         from dataclasses import replace
-        # 验证模式明确采用 CAN 为场地右前角位姿，不附加中心偏移。
+        # 第一组 CAN 对应传入的已知场地右前角位姿，统一变换后再投影。
         watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
-    if source in ("ssh", "local") and watch.setup.origin_basic:
-        setup = load_setup(str(ROOT / "config" / "field.yaml"))
-        if not setup.ready:
-            raise SystemExit("使用 CAN 前请在 config/field.yaml 确认右前角定位已对齐，并设置 aligned: true")
-        watch.setup = setup
+    previous_session = getattr(args, "survey_session", None)
+    if previous_session is None:
+        watch.enable_autonomy()
+        args.survey_session = watch.autonomy
+        args.survey_report = ROOT / "debug_captures" / ("survey_" + time.strftime("%Y%m%d_%H%M%S") + ".json")
+    else:
+        watch.votes = previous_session.watch.votes
+        watch.autonomy = previous_session
+        previous_session.watch = watch
+        previous_session.pause()
+    report_saved_at = 0.0
+    print(f"自主识别记录：{args.survey_report}")
     pipeline, sensor, ready, lock, pending = _open_camera(rs)
+    watch.intr = pending["intrinsics"]
+    camera = pending["camera"]
+    print(f"相机序列号：{camera['serial_number']}；内参来源：当前彩色流")
+    print(f"内参：{watch.intr.width}×{watch.intr.height} "
+          f"fx={watch.intr.fx:.6f} fy={watch.intr.fy:.6f} "
+          f"cx={watch.intr.cx:.6f} cy={watch.intr.cy:.6f}")
+    print(f"畸变：{camera['distortion_model']} {camera['distortion_coefficients']}")
     source = getattr(args, "pose_source", "ssh")
     can_stream = None
     try:
@@ -392,6 +510,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         raise
     previous = ""
     initial_can_pose = None
+    raw_can_origin = None
     light = watch.light
     exposure_wait = 5
     debug_visible = False
@@ -425,10 +544,14 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 if matched is None:
                     for vote in watch.votes.values():
                         vote.on_move()
+                    watch.autonomy.pause()
                     watch.stable_pose = None
                     watch.views = None
                     message = "等待 CAN 位姿 / 数据超时，暂停识别"
-                    cv2.imshow("建塔点", paint_window(color, None, {}, [message]))
+                    cv2.imshow("建塔点", paint_window(color, None, {}, [can_pose_text(None, source), message]))
+                    live_map = getattr(args, "live_map", None)
+                    if live_map is not None:
+                        live_map(None)
                     if previous != message:
                         print(message)
                         previous = message
@@ -437,9 +560,13 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     if can_stream.process.poll() is not None:
                         raise RuntimeError("CAN 读取进程已退出，请检查 SSH 和 CAN 接口")
                     continue
-                current = matched
+                from can_pose import align_can_pose
+                if raw_can_origin is None:
+                    raw_can_origin = matched
+                    print(f"CAN 起始校准：原始 {vars(matched)} → 场地 {vars(pose)}")
+                current = align_can_pose(matched, raw_can_origin, pose)
                 if initial_can_pose is None:
-                    initial_can_pose = matched
+                    initial_can_pose = current
             elif listener is not None:
                 import rclpy
 
@@ -448,6 +575,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 if matched is None:
                     for vote in watch.votes.values():
                         vote.on_move()
+                    watch.autonomy.pause()
                     watch.stable_pose = None
                     cv2.imshow("建塔点", color)
                     print("车位与画面时间不匹配，暂停识别")
@@ -473,8 +601,15 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 light = watch.light
                 _apply_light(sensor, rs, light)
                 exposure_wait = 5
+            args.autonomous_lines = watch.autonomy.lines()
+            if time.monotonic() - report_saved_at >= 1.0:
+                try:
+                    watch.autonomy.save(args.survey_report)
+                except OSError as error:
+                    print(f"保存自主识别记录失败：{error}")
+                report_saved_at = time.monotonic()
             fixed_targets = getattr(args, "fixed_target_lines", [])
-            result_mode = "basic" if fixed_targets else args.mode
+            result_mode = args.mode
             lines = watch.lines(result_mode)
             shown = watch.window_lines(result_mode)
             text = "\n".join(shown)
@@ -484,10 +619,13 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             locked = {name: vote.locked for name, vote in watch.votes.items()}
             shown_pitch = None if measured is None else watch.pitch
             fixed_targets = getattr(args, "fixed_target_lines", [])
-            painted = window_pitch_lines(shown_pitch, None if fixed_targets else watch.required_pitch()) + shown
-            if fixed_targets:
+            painted = window_pitch_lines(shown_pitch, watch.required_pitch()) + shown
+            if fixed_targets and watch.autonomy is None:
                 painted = window_pitch_lines(shown_pitch, None) + ["固定计划（目标角度保持）："] + fixed_targets + shown
             painted.append(f"位姿 {source}: x={current.x:.3f} m y={current.y:.3f} m 旋转={np.degrees(current.yaw):.1f}°")
+            if source == "ssh":
+                painted.insert(0, can_pose_text(current, source))
+                painted.append("SSH CAN 已收到位姿；矩形为投影搜索框，轮廓为识别区域")
             if verify_motion and initial_can_pose is not None:
                 dx = current.x - initial_can_pose.x
                 dy = current.y - initial_can_pose.y
@@ -496,7 +634,10 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 painted.append(f"慢速验证：Δx={dx:+.3f} m Δy={dy:+.3f} m Δyaw={turn:+.1f}°")
                 painted.append(f"CAN 接收年龄 {1000 * (time.monotonic() - current.stamp):.0f} ms；观察框是否保持贴合建塔点")
             painted.append("d 颜色/深度诊断，n 切换塔，s 保存原始帧")
-            cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted))
+            cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted,
+                                             show_boxes=source == "ssh",
+                                             panels=live_panels(watch, current, source,
+                                                 [shown[0]] + ([line for line in painted if line.startswith(("慢速验证", "CAN 接收年龄"))]))))
             if debug_visible:
                 cv2.imshow("颜色与深度诊断", paint_diagnostics(color, depth, watch.views, debug_selected, locked))
             key = cv2.waitKey(1) & 0xFF
@@ -515,6 +656,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                         "stamp": stamp, "pose": vars(current),
                         "pitch_deg": watch.pitch, "roll_deg": watch.roll,
                         "intrinsics": vars(watch.intr),
+                        "camera": camera,
+                        "can_calibration": None if raw_can_origin is None else {
+                            "raw_origin": vars(raw_can_origin), "field_origin": vars(pose),
+                            "raw_pose": vars(matched),
+                        },
                         "center_to_corner": watch.setup.center_to_corner,
                         "light": light, "exposure_wait": exposure_wait,
                     })
@@ -528,6 +674,10 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 _apply_light(sensor, rs, light)
                 exposure_wait = 5
     finally:
+        try:
+            watch.autonomy.save(args.survey_report)
+        except OSError as error:
+            print(f"保存自主识别记录失败：{error}")
         pipeline.stop()
         if can_stream is not None:
             can_stream.close()
@@ -609,4 +759,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

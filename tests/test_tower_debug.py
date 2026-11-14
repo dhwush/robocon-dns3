@@ -11,6 +11,22 @@ from field_map import DISPLAY
 from tower_debug import paint_diagnostics, save_capture
 
 
+def test_ssh_search_box_visible_without_classification():
+    from view_field import paint_window
+    color = np.zeros((400, 600, 3), np.uint8)
+    region = np.array([[200, 200], [300, 220], [250, 300]], np.int32)
+    view = SimpleNamespace(conclusion=None, region=region, piece=None,
+                           method=None, measurements=None)
+    views = {DISPLAY[0]: view}
+    plain = paint_window(color, views, {}, [])
+    boxed = paint_window(color, views, {}, [], show_boxes=True)
+    assert not plain[250, 200].any()
+    assert boxed[250, 200].any()
+    assert not color.any()
+    # 断流时不画历史框。
+    assert not paint_window(color, None, {}, [], show_boxes=True).any()
+
+
 @pytest.mark.parametrize('distance,expected', [(1., '红'), (2., '蓝')])
 def test_debug_exposes_truncated_upper_color_without_changing_result(distance, expected):
     intr = Intrinsics(400, 500, 900, 900, 200, 250)
@@ -54,3 +70,32 @@ def test_capture_preserves_raw_color_invalid_depth_and_diagnostics(tmp_path):
     np.testing.assert_array_equal(color, original)
     # 无深度、无识别结果时也能显示，不伪造深度。
     assert paint_diagnostics(color, None, None).shape == image.shape
+
+
+def test_live_window_groups_targets_can_results_and_footer():
+    from types import SimpleNamespace
+    import numpy as np
+    from car_pose import CarPose
+    from classify import CellView
+    from field_map import DISPLAY
+    from motion import Action
+    from view_field import live_panels, paint_window
+    from vote import Vote
+    name = DISPLAY[0]
+    watch = SimpleNamespace(pitch=2., views={n: CellView('1',True,False,False,False,0.,2.,0.,100.) for n in DISPLAY},
+        votes={n: Vote() for n in DISPLAY})
+    watch.autonomy = SimpleNamespace(action=Action('pitch','',pitch=10.,cell=name,attempt=1),
+        pitch_checks={n: [] for n in DISPLAY}, message='等待相机稳定', complete=False)
+    panels = live_panels(watch,CarPose(0,0,0),'ssh',['光线：室内'])
+    assert any('CAN' in row for row in panels['left'])
+    assert any('车头朝向' in row for row in panels['left'])
+    assert any('相机俯仰' in row for row in panels['left'])
+    assert len(panels['right']) == 7
+    assert all('号' not in row for row in panels['bottom'])
+    assert '等待相机稳定' in panels['bottom']
+    color = np.zeros((720,1280,3),np.uint8)
+    result = paint_window(color,None,{},[],panels=panels)
+    assert result.shape == color.shape
+    assert result[:200,-240:].any()
+    assert result[-100:].any()
+    assert not result[400:500,400:700].any()

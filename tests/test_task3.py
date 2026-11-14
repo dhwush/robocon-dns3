@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from car_pose import CarPose, Setup, camera_position, closest_pose, load_intrinsics, pose_moved
+from car_pose import OBS_STABLE_FRAMES, CarPose, Setup, camera_position, closest_pose, load_intrinsics, pose_moved
 from map_test import (
     X_MAX,
     X_MIN,
@@ -548,9 +548,9 @@ def test_box_in_front_of_the_tower_is_not_a_layer():
     _fill_face(face, face_depth, pose, OFFSET, pitch, cell, 0.02, 0.35)
     for _ in range(10):
         watch.update(pose, face, face_depth)
-    assert watch.votes[cell.name].count == 5
+    assert watch.votes[cell.name].count == 10 - OBS_STABLE_FRAMES
     watch.update(pose, color, depth)
-    assert watch.votes[cell.name].count == 5
+    assert watch.votes[cell.name].count == 10 - OBS_STABLE_FRAMES
     assert watch.votes[cell.name].locked is None
     assert "前面有东西挡住了" in "\n".join(watch.window_lines("extend"))
 
@@ -699,7 +699,7 @@ def test_depth_lock_stays_out_of_the_judge_line():
     depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
     _fill_face(color, depth, pose, OFFSET, pitch, cell, 0.02, 0.35)
     watch = FieldWatch(Setup(True, OFFSET, pitch, "", "rad"), INTR)
-    for _ in range(LOCK_FRAMES + 4):
+    for _ in range(LOCK_FRAMES + OBS_STABLE_FRAMES - 1):
         watch.update(pose, color, depth)
     assert watch.votes[cell.name].locked is None
     watch.update(pose, color, depth)
@@ -758,7 +758,7 @@ def test_frames_lock_and_one_frame_does_not_unlock():
     watch = FieldWatch(setup, INTR)
     color = _blank()
     _paint(color, pose, 0.0, _cell("右侧地面远一格"), 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
-    for _ in range(LOCK_FRAMES + 4):
+    for _ in range(LOCK_FRAMES + OBS_STABLE_FRAMES - 1):
         watch.update(pose, color)
     assert watch.votes["右侧地面远一格"].locked is None
     watch.update(pose, color)
@@ -910,8 +910,8 @@ def test_remaining_view_stays_put_and_exhausted_view_moves():
     views = {
         name: CellView(None, False, False, False, False, 0.0, 0.0, 0.0, 255.0) for name in names
     }
-    views[target] = CellView(None, False, True, False, False, 40.0, -6.0, 0.0, 255.0)
-    text = next_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: MAX_TRIES - 1})
+    views[target] = inspect_frame(pose, OFFSET, 0.0, INTR, None, None)[target]
+    text = next_action(views, locked, pose, OFFSET, 0.0, True, INTR, {target: 0})
     assert text is not None
     assert "平移" not in text
     assert "度" in text
@@ -955,7 +955,7 @@ def test_blocked_cell_asks_for_one_slide_when_the_view_is_open():
 def test_visible_cells_lock_before_the_slide():
     watch = FieldWatch(_setup(), INTR)
     color = _blank()
-    for _ in range(LOCK_FRAMES + 4):
+    for _ in range(LOCK_FRAMES + OBS_STABLE_FRAMES - 1):
         watch.update(START, color)
     assert all(not line.endswith("米") for line in watch.lines("extend"))
     watch.update(START, color)
@@ -1291,14 +1291,14 @@ def test_map_route_lists_heading_and_pitch_when_a_stop_is_clicked():
     u, v = _pixel(*points[0])
     assert hit_route(points, u, v) == 0
     text = " ".join(stop_lines(stops, 0))
-    assert "已到达" in text
-    assert "完成识别" in text
+    assert "车停在这里" in text
+    assert "完成识别" not in text
     if stops[0].looks:
         assert "朝向" in text and "度" in text
     covered = {look.number for stop in stops for look in stop.looks}
     assert covered
     if covered >= set("123456"):
-        assert "停止" in " ".join(stop_lines(stops, len(stops) - 1))
+        assert "停止" not in " ".join(stop_lines(stops, len(stops) - 1))
 
 
 def test_selecting_a_stop_uses_its_calculated_heading():
@@ -1312,8 +1312,8 @@ def test_selecting_a_stop_uses_its_calculated_heading():
     assert look_yaw_text(stops, 1, 0) == "-0.4"
     assert look_yaw_text(stops, 0, 1) == "-28.4"
     text = " ".join(stop_lines(stops, 0, 1))
-    assert "4  朝向 向右 28 度" in text
-    assert "当前" in text.split("4  朝向")[1]
+    assert "4号塔【当前选择】：先朝右28°" in text
+    assert "相机抬头到 6 度" in text.split("4号塔")[1]
 
 
 def test_pinned_stop_keeps_its_coordinates_for_the_camera():
