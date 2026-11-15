@@ -99,3 +99,40 @@ def test_rgb_cap_with_no_visible_white_body(upper,lower,expected):
     view = inspect_frame(pose,offset,0.,intr,color,None)[cell.name]
     assert view.conclusion == expected
     assert view.method == 'RGB顶块'
+
+
+@pytest.mark.parametrize('single', [False, True])
+def test_rgb_diagnostic_reports_rejection_without_changing_result(single):
+    from classify import _rgb_cap_reading, _mask
+    from car_pose import to_camera
+    cell, pose, offset, intr, color, depth = merged_scene()
+    if single:
+        color[(color[:, :, 2] > 120) & (color[:, :, 0] < 50)] = (220, 0, 0)
+    mask = _mask(cell, pose, offset, 0., intr)
+    z = float(to_camera(cell.center(cell.one_z), pose, offset, 0.)[2])
+    info = {}
+    plain = _rgb_cap_reading(cell, color, mask, pose, offset, 0., intr, z)
+    measured = _rgb_cap_reading(cell, color, mask, pose, offset, 0., intr, z, diagnostic=info)
+    assert (plain is None) == (measured is None) == single
+    rgb = info['rgb_cap']
+    target = max(rgb['checks'], key=lambda c: c['inside_pixels'])
+    if single:
+        assert any('红或蓝面积不足' in reason for reason in target['failures'])
+        assert target['red_pixels'] == 0
+    else:
+        assert measured[0] == plain[0] == '红'
+        assert not target['failures']
+        assert abs(target['bottom_error_cm']) <= 12
+        assert abs(target['top_error_cm']) <= 15
+    from types import SimpleNamespace
+    from tower_debug import paint_diagnostics
+    from field_map import DISPLAY
+    view = SimpleNamespace(conclusion=None if single else '红', reason=None,
+                           region=mask_to_outline(mask), measurements=info)
+    rendered = paint_diagnostics(color, depth, {cell.name: view}, DISPLAY.index(cell.name))
+    assert rendered.shape == (748, 1280, 3)
+
+
+def mask_to_outline(mask):
+    import cv2
+    return cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]

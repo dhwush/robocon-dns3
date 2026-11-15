@@ -18,9 +18,10 @@ def _label(board, lines):
     from view_field import _FONT
     panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(panel)
-    font = ImageFont.truetype(_FONT, 16)
+    step = min(22, max(12, (board.shape[0]-10)//max(1, len(lines))))
+    font = ImageFont.truetype(_FONT, min(16, step-2))
     for row, line in enumerate(lines):
-        draw.text((8, 5 + row * 22), line, font=font, fill='white',
+        draw.text((8, 5 + row * step), line, font=font, fill='white',
                   stroke_width=1, stroke_fill='black')
     return cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
 
@@ -109,7 +110,42 @@ def paint_diagnostics(color, depth, views, selected=0, locked=None):
     ]
     rgb_cap = measure.get('rgb_cap') or {}
     if rgb_cap:
-        descriptions[2].append(f"独立RGB顶块：合格候选{rgb_cap['candidates']}个；位置/高度/两色上下关系核验")
+        descriptions[2].append(f"RGB顶块：合格{rgb_cap['candidates']}个；{rgb_cap.get('reason', '')}")
+        if 'distance_m' in rgb_cap:
+            descriptions[2].append(
+                f"估距{rgb_cap['distance_m']:.2f}m 俯仰{rgb_cap['pitch_deg']:+.1f}° "
+                f"横滚{rgb_cap['roll_deg']:+.1f}° 闭合半径{rgb_cap['close_radius_px']}px")
+        checks = sorted(rgb_cap.get('checks', []),
+                        key=lambda c: c['inside_pixels'], reverse=True)
+        descriptions[1].append('编号=RGB连通块；绿=通过，橙=拒绝；下方列格内像素最多的两块')
+        for item in checks:
+            x, y, w, h = item['bbox']
+            ink = (0, 165, 255) if item['failures'] else (0, 255, 0)
+            cv2.rectangle(masks, (x, y), (x+w-1, y+h-1), ink, 1)
+            cv2.putText(masks, f"C{item['id']}", (x, min(height-3, y+h+14)),
+                        cv2.FONT_HERSHEY_SIMPLEX, .45, ink, 1)
+        for item in checks[:2]:
+            descriptions[2].extend([
+                f"C{item['id']} 宽/高{item['width_cm']:.1f}/{item['height_cm']:.1f}cm "
+                f"格内{item['coverage']:.0%} 填充{item['fill']:.0%}",
+                f"红/蓝{item['red_pixels']}/{item['blue_pixels']}px 各需≥{item['need']}px；"
+                + ('通过' if not item['failures'] else '拒绝'),
+            ])
+            if 'bottom_cm' in item:
+                descriptions[2].append(
+                    f"底/顶{item['bottom_cm']:.1f}/{item['top_cm']:.1f}cm "
+                    f"误差{item['bottom_error_cm']:+.1f}/{item['top_error_cm']:+.1f}(限±12/15)")
+                descriptions[2].append(
+                    f"横向重叠{item['horizontal_overlap']:.0%}(≥50%) "
+                    f"上下间距{item['vertical_gap_px']:.1f}px(>0)")
+            # 长原因分行，避免超出640像素面板。
+            reasons = item['failures']
+            for reason in reasons[:2]:
+                descriptions[2].append('× ' + reason)
+            if len(reasons) > 2:
+                descriptions[2].append(f"另{len(reasons)-2}项拒绝原因见s保存数据")
+        if not checks:
+            descriptions[2].append('当前格内没有红蓝连通块；先查颜色阈值及搜索框位置')
     if far_support:
         descriptions[3].append('远处融合：' + far_support.get('reason', ''))
         if 'width_cm' in far_support:

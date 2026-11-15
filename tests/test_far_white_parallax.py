@@ -50,6 +50,75 @@ def test_missing_upper_evidence_cannot_confirm_layer_count(layers):
     assert not view.measurements['far_white']['upper_clear']
 
 
+def body_heights(pose, offset, intr, depth):
+    origin,right,down,ahead = camera_frame(pose,offset,0.)
+    rows,cols = np.indices(depth.shape)
+    rays = ((cols-intr.cx)/intr.fx)[...,None]*right + ((rows-intr.cy)/intr.fy)[...,None]*down + ahead
+    return (origin+depth[...,None]*rays)[...,2]
+
+
+@pytest.mark.parametrize('layers',[1,2])
+def test_far_white_with_only_top_strip_and_separated_background(layers):
+    cell,pose,offset,intr,color,depth = scene(layers)
+    top = cell.one_z if layers == 1 else cell.two_z
+    z = body_heights(pose,offset,intr,depth)
+    depth[(depth<6)&(z<top-.12)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == str(layers)
+    info = view.measurements['far_white']
+    assert info['partial_body'] and info['top_edge_clear'] and info['upper_clear']
+    assert info['height_span_cm'] < 18
+
+
+@pytest.mark.parametrize('kind',['unknown_above','middle_of_two_layers','too_thin','wrong_top'])
+def test_partial_white_cannot_invent_a_top_edge(kind):
+    cell,pose,offset,intr,color,depth = scene(2 if kind == 'middle_of_two_layers' else 1)
+    z = body_heights(pose,offset,intr,depth)
+    top = cell.one_z
+    if kind == 'wrong_top':
+        top -= .12
+        depth[(depth<6)&(z>top)] = 8.
+    thickness = .03 if kind == 'too_thin' else .12
+    depth[(depth<6)&(z<top-thickness)] = np.nan
+    if kind == 'middle_of_two_layers':
+        # 上层实际仍在，仅将其深度置为无效；无返回不能当作上方为空。
+        depth[(depth<6)&(z>top)] = np.nan
+    if kind == 'unknown_above':
+        depth[depth>=6] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion is None
+    assert view.needs_parallax
+
+
+def test_separated_depth_fragments_of_same_white_face_are_combined():
+    cell,pose,offset,intr,color,depth = scene(1)
+    z = body_heights(pose,offset,intr,depth)
+    # 8厘米的横向深度缺口，超出5像素闭运算的连接能力。
+    depth[(depth<6)&(z>.12)&(z<.20)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == '1'
+    assert view.measurements['far_white']['height_span_cm'] > 25
+
+
+def test_lower_fragment_on_different_depth_plane_is_not_combined():
+    cell,pose,offset,intr,color,depth = scene(1)
+    z = body_heights(pose,offset,intr,depth)
+    body = depth<6
+    depth[body&(z>.12)&(z<.23)] = np.nan
+    depth[body&(z<=.12)] += .20
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == '1'
+    info = view.measurements['far_white']
+    assert info['partial_body'] and info['height_span_cm'] < 18
+
+
+def test_uniform_background_wall_is_not_a_partial_white_box():
+    cell,pose,offset,intr,color,depth = scene(1)
+    depth[:] = 8.
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion is None
+
+
 def test_lateral_request_selects_reachable_view_with_real_parallax():
     cell,pose,offset,intr,color,depth = scene(2,True)
     views = inspect_frame(pose,offset,0.,intr,color,depth)

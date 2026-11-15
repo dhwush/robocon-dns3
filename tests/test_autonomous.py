@@ -574,6 +574,37 @@ def test_far_rgb_opportunity_cannot_confirm_empty_or_white_only(monkeypatch):
         assert not survey.pitch_checks[name]
 
 
+@pytest.mark.parametrize('value', ['1', '2'])
+def test_verified_far_white_accumulates_three_pitch_checks(monkeypatch, value):
+    from field_map import tower_cells
+    survey, watch, clock, name = make_survey(monkeypatch)
+    cell = next(c for c in tower_cells() if c.name == name)
+    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
+    view = watch.views[name]
+    view.conclusion, view.method = value, '远处白盒'
+    view.measurements = {'far_white': {'upper_clear': True}}
+    observe(survey,clock,7)
+    assert len(survey.pitch_checks[name]) == 1
+    watch.pitch = 8.
+    observe(survey,clock,7)
+    assert len(survey.pitch_checks[name]) == 2
+    assert watch.votes[name].locked is None
+    watch.pitch = -8.
+    observe(survey,clock,7)
+    assert watch.votes[name].locked == value
+
+
+def test_far_white_without_upper_space_verification_is_not_counted(monkeypatch):
+    from field_map import tower_cells
+    survey, watch, clock, name = make_survey(monkeypatch)
+    cell = next(c for c in tower_cells() if c.name == name)
+    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
+    watch.views[name].method = '远处白盒'
+    watch.views[name].measurements = {'far_white': {'upper_clear': False}}
+    observe(survey,clock,7)
+    assert not survey.pitch_checks[name]
+
+
 def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range():
     import motion
     from field_map import tower_cells

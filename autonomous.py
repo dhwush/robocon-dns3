@@ -306,10 +306,12 @@ class AutonomousSurvey:
                 evidence.clear()
                 continue
             value = None if view.skip_vote else view.conclusion
-            # 远距试读只采信独立顶块；空点/白盒仍用原有近距规划确认。
+            # 远处只采信独立顶块或已经核验深度、顶高和上方空域的白盒。
             cell = next(c for c in tower_cells() if c.name == name)
             far = _slant(cell, camera_position(pose, watch.setup.center_to_corner, 0.)) > DEPTH_FAR_M
-            if far and (value not in ('红', '蓝') or view.method != 'RGB顶块'):
+            verified_white = (value in ('1', '2') and view.method == '远处白盒'
+                              and (view.measurements or {}).get('far_white', {}).get('upper_clear') is True)
+            if far and not (value in ('红', '蓝') and view.method == 'RGB顶块' or verified_white):
                 value = None
             result = evidence.see(value, now)
             if result is None:
