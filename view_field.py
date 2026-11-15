@@ -1,9 +1,9 @@
 """任务三的两条实地指令，启动方式不同。
 
-基础：人把右前角摆在场地原点右侧 1.2 米，前后对齐，车头朝前。不订雷达。
+基础：读取雷达给出的右前角实时位姿；无有效雷达数据时暂停。
 python view_field.py basic
 
-拓展：订阅雷达给的小车中心 x、y 和航向，再告诉裁判下一步。
+拓展：同样直接使用雷达右前角场地位姿。，再告诉裁判下一步。
 python view_field.py extend
 
 按 d 开关颜色/深度诊断，n 切换诊断塔，s 保存原始帧和诊断图到 debug_captures。
@@ -15,6 +15,7 @@ python view_field.py extend
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import time
 from pathlib import Path
 
@@ -24,18 +25,21 @@ from car_pose import (
     CarPose,
     Intrinsics,
     basic_origin_setup,
-    closest_pose,
     load_intrinsics,
     load_setup,
     pitch_from_gravity,
     roll_from_gravity,
     yaw_to_rad,
 )
+from radar_pose import add_radar_arguments, normalize_source, open_radar, radar_pose_text
 from field_map import TOWER_NO
 from report import LEVEL_LOCK, FieldWatch, light_from_key, window_pitch_lines
 
 
 ROOT = Path(__file__).resolve().parent
+
+# Qt后端的鼠标回调按Latin-1查找窗口，内部名称使用ASCII。
+CAMERA_WINDOW = "tower_camera"
 
 
 def _setup_from_args(args):
@@ -67,76 +71,6 @@ def _read_image(path: str):
         raise SystemExit(f"读不到画面：{path}")
     depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
     return color, depth
-
-
-def _subscribe(topic: str, yaw_unit: str) -> CarPose | None:
-    # 只订阅一次，不给雷达下命令。
-    try:
-        import rclpy
-        from rclpy.node import Node
-        from nav_msgs.msg import Odometry
-    except ImportError:
-        return None
-    if not topic:
-        return None
-    if not rclpy.ok():
-        rclpy.init()
-    node = Node("field_pose_once")
-    holder: dict[str, CarPose] = {}
-
-    def _on_msg(msg) -> None:
-        q = msg.pose.pose.orientation
-        siny = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        yaw = float(np.arctan2(siny, cosy))
-        stamp = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
-        holder["pose"] = CarPose(
-            float(msg.pose.pose.position.x),
-            float(msg.pose.pose.position.y),
-            yaw,
-            stamp,
-        )
-
-    node.create_subscription(Odometry, topic, _on_msg, 10)
-    for _ in range(30):
-        rclpy.spin_once(node, timeout_sec=0.1)
-        if "pose" in holder:
-            break
-    node.destroy_node()
-    return holder.get("pose")
-
-
-def _listen(topic: str, yaw_unit: str):
-    try:
-        import rclpy
-        from rclpy.node import Node
-        from nav_msgs.msg import Odometry
-    except ImportError:
-        return None
-    if not rclpy.ok():
-        rclpy.init()
-    node = Node("field_pose")
-    samples: list[CarPose] = []
-
-    def _on_msg(msg) -> None:
-        q = msg.pose.pose.orientation
-        siny = 2.0 * (q.w * q.z + q.x * q.y)
-        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        yaw = float(np.arctan2(siny, cosy))
-        stamp = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
-        samples.append(
-            CarPose(
-                float(msg.pose.pose.position.x),
-                float(msg.pose.pose.position.y),
-                yaw,
-                stamp,
-            )
-        )
-        if len(samples) > 50:
-            del samples[:-50]
-
-    node.create_subscription(Odometry, topic, _on_msg, 10)
-    return node, samples
 
 
 _FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
@@ -195,7 +129,11 @@ def _wrap(draw, text: str, font, width: int) -> list[str]:
 
 
 def can_pose_text(pose: CarPose | None, source: str) -> str:
-    label = "SSH CAN" if source == "ssh" else "CAN"
+    if source in ("radar", "ros", "laptop", "host"):
+        return radar_pose_text(pose)
+    label = "SSH CAN" if source == "ssh" else "离线手动" if source == "static" else "CAN"
+    if source == "static":
+        return f"离线手动 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={np.degrees(pose.yaw):+.1f}°" if pose else "离线手动：无位姿"
     if pose is None:
         return f"{label} 等待位姿 / 数据超时：x=-- m  y=-- m  yaw=--°"
     label += " 已校准场地位姿"
@@ -205,7 +143,7 @@ def can_pose_text(pose: CarPose | None, source: str) -> str:
 
 
 def live_panels(watch, pose, source, extras=()):
-    """窗口三分区：操作目标/CAN、结果、其余状态。"""
+    """窗口三分区：操作目标/定位、结果、其余状态。"""
     from motion import GOAL_BEARING, MAX_TRIES, heading_words, format_pitch
     left = [can_pose_text(pose, source), f"当前相机：{format_pitch(watch.pitch)}"]
     right = ["识别结果"]
@@ -218,6 +156,9 @@ def live_panels(watch, pose, source, extras=()):
         right.append(f"{TOWER_NO[name]}号  {words.get(value, '未知')}  {status}")
     survey = watch.autonomy
     action = None if survey is None else survey.action
+    if survey is not None and getattr(survey, 'stop_until', None) is not None:
+        left.append(survey.stop_message)
+        action = None
     if action is not None and action.cell and action.kind != 'move':
         view = watch.views[action.cell]
         center = survey.heading_center(action.cell)
@@ -238,14 +179,17 @@ def live_panels(watch, pose, source, extras=()):
         left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
     route_hint = []
     if survey is not None and getattr(survey,'primary_stops',None):
-        route_hint = [f"主线 A→沿途复看→B近点（{min(survey.primary_index,len(survey.primary_stops))}/{len(survey.primary_stops)}）；远塔确认即跳过远端行程"]
+        route_hint = [f"主线 A→一个沿途点→B近点（{min(survey.primary_index,len(survey.primary_stops))}/{len(survey.primary_stops)}）；未完成时再启用沿途备用点"]
+    if survey is not None:
+        metrics = survey.metrics()
+        route_hint.append(f"本轮观测 {metrics['observation_count']} 次 · 累计路程 {metrics['distance_m']:.3f} 米")
     bottom = route_hint + ([survey.message] if survey is not None else []) + list(extras)
     bottom += ["朝向以场地前方为0°；近处两档、远处三档一致才确认；主线看够再去兜底",
                "1–5 光线 | d 诊断 | n 切换塔 | s 保存 | q 退出"]
     return dict(left=left, right=right, bottom=bottom)
 
 
-def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool = False, panels=None):
+def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool = False, panels=None, confirmation=None):
     # 格子轮廓标出在看哪一块。认到白盒后再沿白盒描一圈，并在旁边写短词。
     import cv2
     from PIL import Image, ImageDraw, ImageFont
@@ -267,6 +211,16 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
             if view.piece is not None:
                 cv2.drawContours(board, [view.piece], -1, bgr, 2, cv2.LINE_AA)
             measure = getattr(view, "measurements", None) or {}
+            white_piece = measure.get('white_piece')
+            if view.method == 'RGB顶块' and white_piece is not None:
+                cv2.drawContours(board, [white_piece], -1, (255, 0, 255), 2, cv2.LINE_AA)
+                wx, wy = _anchor(white_piece)
+                tags.append((int(wx), int(wy), f"{TOWER_NO[name]} 白盒", (255, 0, 255)))
+            elif view.method == 'RGB顶块':
+                for candidate in measure.get('white_candidates', []):
+                    cv2.drawContours(board, [candidate], -1, (255, 0, 255), 2, cv2.LINE_AA)
+                    wx, wy = _anchor(candidate)
+                    tags.append((int(wx), int(wy), f"{TOWER_NO[name]} 白盒候选", (255, 0, 255)))
             points = measure.get("top_pixels", [])
             for x, y in points:
                 cv2.circle(
@@ -311,7 +265,7 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
             return
         box_height = len(rows)*line_height+8
         if bottom:
-            y = height-gap-box_height
+            y = height-gap-box_height-(48 if confirmation is not None else 0)
         for row in rows:
             draw.text((x+8,y+4), row, font=font, fill=(245,245,245),
                       stroke_width=1, stroke_fill=(0,0,0))
@@ -320,10 +274,15 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
     bottom_lines = panels.get('bottom', [])
     bottom_rows = sum(len(_wrap(draw,line,font,max(20,width-32))) for line in bottom_lines)
     footer_height = min(height//3, bottom_rows*line_height+8) if bottom_rows else 0
-    top_height = height-footer_height-3*gap
+    top_height = height-footer_height-3*gap-(48 if confirmation is not None else 0)
     block(panels.get('left', []), gap, gap, left_width, top_height)
     block(panels.get('right', []), width-right_width-gap, gap, right_width, top_height)
     block(bottom_lines, gap, 0, width-2*gap, footer_height, bottom=True)
+    if confirmation is not None:
+        name, result = confirmation
+        draw.rectangle((8, height-46, width-8, height-8), fill=(25, 110, 55))
+        draw.text((16, height-42), f"观测正确：{TOWER_NO[name]}号 {result} · 点击或按 c 确认，跳过该塔后续观测",
+                  font=font, fill=(255, 255, 255))
     board[:] = cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
     return board
 
@@ -396,7 +355,8 @@ def _open_camera(rs):
     ready = threading.Event()
     scale = {"v": 0.001}
     accel = {"rotation": None, "gravity": None}
-    pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0, "received": 0.0}
+    pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0, "received": 0.0,
+                     "history": deque(maxlen=24)}
 
     def on_frame(frame) -> None:
         try:
@@ -432,6 +392,7 @@ def _open_camera(rs):
                 pending["gravity"] = gravity
                 pending["stamp"] = stamp
                 pending["received"] = time.monotonic()
+                pending["history"].append((color, depth, gravity, stamp, pending["received"]))
             ready.set()
         except Exception:
             return
@@ -462,6 +423,22 @@ def _open_camera(rs):
     return pipeline, sensor, ready, lock, pending
 
 
+def matched_camera_frame(history, stream, after_stamp):
+    """将延迟到达的位姿与历史同帧彩色/深度/重力配对，不重复处理旧画面。"""
+    pose = stream.match()
+    if pose is None:
+        return None
+    candidates = [frame for frame in history
+                  if np.isfinite(frame[3]) and frame[3] > after_stamp
+                  and abs(frame[3] - pose.stamp) <= .15]
+    if not candidates:
+        return None
+    frame = min(candidates, key=lambda frame: abs(frame[3] - pose.stamp))
+    # 再次核验流状态与过期限制，不能只依赖先前缓存的有效状态。
+    matched = stream.match(frame[3])
+    return None if matched is None else (frame, matched)
+
+
 def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     import cv2
 
@@ -472,15 +449,15 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         print("\n".join(lines))
         print("没有接上相机")
         return lines
-    source = getattr(args, "pose_source", "ssh")
-    if source in ("ssh", "local"):
-        # CAN 两种入口起始实际朝向固定为场地0度，观测角度只是后续转向目标。
-        pose = CarPose(pose.x, pose.y, 0.0, pose.stamp)
+    normalize_source(args)
+    source = args.pose_source
     verify_motion = getattr(args, "verify_motion", False)
-    if source in ("ssh", "local"):
+    if source in ("radar", "ros", "laptop", "host"):
         from dataclasses import replace
-        # 第一组 CAN 对应传入的已知场地右前角位姿，统一变换后再投影。
         watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
+    elif source == "static":
+        from dataclasses import replace
+        watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=True)
     previous_session = getattr(args, "survey_session", None)
     if args.mode == "static":
         pass  # 独立静态模式不启动自主移动流程。
@@ -494,6 +471,15 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         previous_session.watch = watch
         previous_session.pause()
     report_saved_at = 0.0
+    confirm_ui = dict(target=None, clicked=None, height=0, width=0)
+
+    def confirm_click(event, x, y, flags, param):
+        if (event == cv2.EVENT_LBUTTONDOWN and 8 <= x < confirm_ui['width']-8
+                and confirm_ui['height']-46 <= y <= confirm_ui['height']-8):
+            confirm_ui['clicked'] = confirm_ui['target']
+
+    cv2.namedWindow(CAMERA_WINDOW, cv2.WINDOW_AUTOSIZE)
+    cv2.setMouseCallback(CAMERA_WINDOW, confirm_click)
     if watch.autonomy is not None:
         print(f"自主识别记录：{args.survey_report}")
     pipeline, sensor, ready, lock, camera_frames = _open_camera(rs)
@@ -504,20 +490,16 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
           f"fx={watch.intr.fx:.6f} fy={watch.intr.fy:.6f} "
           f"cx={watch.intr.cx:.6f} cy={watch.intr.cy:.6f}")
     print(f"畸变：{camera['distortion_model']} {camera['distortion_coefficients']}")
-    source = getattr(args, "pose_source", "ssh")
-    can_stream = None
+    radar_stream = None
     try:
-        if source in ("ssh", "local"):
-            from can_pose import CanPoseStream
-            can_stream = CanPoseStream(source, getattr(args, "can_interface", "can0"),
-                                       getattr(args, "ssh_host", "volleyball@192.168.3.194"))
-        listener = _listen(watch.setup.topic, watch.setup.yaw_unit) if source == "ros" and watch.setup.topic else None
+        if source in ("radar", "ros", "laptop", "host"):
+            radar_stream = getattr(args, "radar_stream", None) or open_radar(args)
     except Exception:
         pipeline.stop()
         raise
     previous = ""
-    initial_can_pose = None
-    raw_can_origin = None
+    initial_radar_pose = None
+    last_processed_stamp = float("-inf")
     light = watch.light
     exposure_wait = 5
     debug_visible = False
@@ -538,62 +520,53 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 gravity = None if camera_frames["gravity"] is None else camera_frames["gravity"].copy()
                 stamp = float(camera_frames["stamp"])
                 received = float(camera_frames["received"])
+                history = list(camera_frames.get("history", ()))
             if color is None or depth is None:
                 continue
+            current = pose
+            if radar_stream is not None:
+                if "history" in camera_frames:
+                    pairing = matched_camera_frame(history, radar_stream, last_processed_stamp)
+                    matched = None if pairing is None else pairing[1]
+                    if pairing is not None:
+                        color, depth, gravity, stamp, received = pairing[0]
+                else:
+                    matched = getattr(radar_stream, "match_frame", radar_stream.match)(stamp)
+                if matched is None and history and np.isfinite(last_processed_stamp) and radar_stream.match() is not None:
+                    # 同一个5Hz位姿对应的画面已处理完；等待新测量，不重复计票。
+                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                        return watch.lines(args.mode)
+                    continue
+                if matched is None:
+                    suspend_for_radar(watch)
+                    message = radar_pose_text(None) + '；' + (radar_stream.error or '等待与雷达时间匹配的新相机帧（差值上限0.15秒）')
+                    confirm_ui['target'] = None
+                    cv2.imshow(CAMERA_WINDOW, paint_window(color, None, {}, [message]))
+                    live_map = getattr(args, "live_map", None)
+                    if live_map is not None:
+                        live_map(None)
+                    args.autonomous_map_lines = [message]
+                    args.autonomous_route = {}
+                    if debug_visible:
+                        cv2.imshow("颜色与深度诊断", color)
+                    if previous != message:
+                        print(message)
+                        previous = message
+                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                        return watch.lines(args.mode)
+                    continue
+                current = matched
+                if initial_radar_pose is None:
+                    initial_radar_pose = current
+            elif not watch.setup.origin_basic:
+                print("没有实时车位，暂停识别")
+                return watch.lines(args.mode)
+            last_processed_stamp = stamp
             measured = pitch_from_gravity(gravity)
             rolled = roll_from_gravity(gravity)
             watch.follow_pitch(measured)
             if rolled is not None:
                 watch.roll = rolled
-            current = pose
-            if can_stream is not None:
-                matched = can_stream.match(received)
-                if matched is None:
-                    for vote in watch.votes.values():
-                        vote.on_move()
-                    watch.autonomy.pause()
-                    watch.stable_pose = None
-                    watch.views = None
-                    message = "等待 CAN 位姿 / 数据超时，暂停识别"
-                    cv2.imshow("建塔点", paint_window(color, None, {}, [can_pose_text(None, source), message]))
-                    live_map = getattr(args, "live_map", None)
-                    if live_map is not None:
-                        live_map(None)
-                    if previous != message:
-                        print(message)
-                        previous = message
-                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
-                        return []
-                    if can_stream.process.poll() is not None:
-                        raise RuntimeError("CAN 读取进程已退出，请检查 SSH 和 CAN 接口")
-                    continue
-                from can_pose import align_can_pose
-                if raw_can_origin is None:
-                    raw_can_origin = matched
-                    print(f"CAN 起始校准：原始 {vars(matched)} → 场地 {vars(pose)}")
-                current = align_can_pose(matched, raw_can_origin, pose)
-                if initial_can_pose is None:
-                    initial_can_pose = current
-            elif listener is not None:
-                import rclpy
-
-                rclpy.spin_once(listener[0], timeout_sec=0.0)
-                matched = closest_pose(listener[1], stamp)
-                if matched is None:
-                    for vote in watch.votes.values():
-                        vote.on_move()
-                    watch.autonomy.pause()
-                    watch.stable_pose = None
-                    cv2.imshow("建塔点", color)
-                    print("车位与画面时间不匹配，暂停识别")
-                    key = cv2.waitKey(1) & 0xFF
-                    if key in (ord("q"), 27):
-                        return watch.lines(args.mode)
-                    continue
-                current = matched
-            elif not watch.setup.origin_basic:
-                print("没有实时车位，暂停识别")
-                return watch.lines(args.mode)
             live_map = getattr(args, "live_map", None)
             if live_map is not None:
                 live_map(current)
@@ -616,7 +589,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 args.autonomous_map_lines = [watch.autonomy.message,
                     "已确认塔：" + ('、'.join(confirmed) or '无'),
                     "待测塔：" + ('、'.join(pending_towers) or '无；测量完成'),
-                    "A起点→沿途复看→B近点；主线用尽才去远处兜底"]
+                    "A→一个沿途点→B；未完成→备用点→兜底"]
                 if time.monotonic() - report_saved_at >= 1.0:
                     try:
                         watch.autonomy.save(args.survey_report)
@@ -627,6 +600,8 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             result_mode = args.mode
             lines = watch.lines(result_mode)
             shown = watch.window_lines(result_mode)
+            if source in ("radar", "ros", "laptop", "host"):
+                shown = [radar_pose_text(current)] + shown
             text = "\n".join(shown)
             if text != previous:
                 print(text)
@@ -638,19 +613,21 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if fixed_targets and watch.autonomy is None:
                 painted = window_pitch_lines(shown_pitch, None) + ["固定计划（目标角度保持）："] + fixed_targets + shown
             painted.append(f"位姿 {source}: x={current.x:.3f} m y={current.y:.3f} m 旋转={np.degrees(current.yaw):.1f}°")
-            if source == "ssh":
-                painted.insert(0, can_pose_text(current, source))
-                painted.append("SSH CAN 已收到位姿；矩形为投影搜索框，轮廓为识别区域")
-            if verify_motion and initial_can_pose is not None:
-                dx = current.x - initial_can_pose.x
-                dy = current.y - initial_can_pose.y
-                turn = np.degrees(np.arctan2(np.sin(current.yaw - initial_can_pose.yaw),
-                                             np.cos(current.yaw - initial_can_pose.yaw)))
+            if verify_motion and initial_radar_pose is not None:
+                dx = current.x - initial_radar_pose.x
+                dy = current.y - initial_radar_pose.y
+                turn = np.degrees(np.arctan2(np.sin(current.yaw - initial_radar_pose.yaw),
+                                             np.cos(current.yaw - initial_radar_pose.yaw)))
                 painted.append(f"慢速验证：Δx={dx:+.3f} m Δy={dy:+.3f} m Δyaw={turn:+.1f}°")
-                painted.append(f"CAN 接收年龄 {1000 * (time.monotonic() - current.stamp):.0f} ms；观察框是否保持贴合建塔点")
             painted.append("d 颜色/深度诊断，n 切换塔，s 保存原始帧")
-            cv2.imshow("建塔点", paint_window(color, watch.views, locked, painted,
-                                             show_boxes=source == "ssh",
+            confirm_ui['target'] = None if watch.autonomy is None else watch.autonomy.confirmation_target()
+            confirm_ui['height'], confirm_ui['width'] = color.shape[:2]
+            if watch.autonomy is not None:
+                metrics = watch.autonomy.metrics()
+                painted.append(f"本轮：观测{metrics['observation_count']}次，累计路程{metrics['distance_m']:.3f}米")
+            cv2.imshow(CAMERA_WINDOW, paint_window(color, watch.views, locked, painted,
+                                             show_boxes=source in ("radar", "ros", "laptop", "host"),
+                                             confirmation=confirm_ui["target"],
                                              panels=None if args.mode == "static" else live_panels(watch, current, source,
                                                  [shown[0]] + ([line for line in painted if line.startswith(("慢速验证", "CAN 接收年龄"))]))))
             if debug_visible:
@@ -658,6 +635,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines
+            target = confirm_ui['clicked'] or (confirm_ui['target'] if key == ord('c') else None)
+            confirm_ui['clicked'] = None
+            if target is not None and watch.autonomy is not None:
+                if watch.autonomy.confirm_current(target):
+                    watch.autonomy.save(args.survey_report)
             if key == ord("d"):
                 debug_visible = not debug_visible
                 if not debug_visible:
@@ -672,10 +654,8 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                         "pitch_deg": watch.pitch, "roll_deg": watch.roll,
                         "intrinsics": vars(watch.intr),
                         "camera": camera,
-                        "can_calibration": None if raw_can_origin is None else {
-                            "raw_origin": vars(raw_can_origin), "field_origin": vars(pose),
-                            "raw_pose": vars(matched),
-                        },
+                        "pose_source": source,
+                        "pose_reference": getattr(args, "pose_reference", "corner"),
                         "center_to_corner": watch.setup.center_to_corner,
                         "light": light, "exposure_wait": exposure_wait,
                     })
@@ -695,19 +675,42 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             except OSError as error:
                 print(f"保存自主识别记录失败：{error}")
         pipeline.stop()
-        if can_stream is not None:
-            can_stream.close()
+        if radar_stream is not None and radar_stream is not getattr(args, "radar_stream", None):
+            radar_stream.close()
         cv2.destroyAllWindows()
-        if listener is not None:
-            listener[0].destroy_node()
+
+
+def suspend_for_radar(watch):
+    for vote in watch.votes.values():
+        vote.on_move()
+    if watch.autonomy is not None:
+        watch.autonomy.suspend_sampling()
+    watch.stable_pose = None
+    watch.views = None
 
 
 def _once(args, watch: FieldWatch, pose: CarPose) -> list[str]:
+    if getattr(args, 'pose_source', None) in ('radar', 'ros', 'laptop', 'host'):
+        from dataclasses import replace
+        watch.setup = replace(watch.setup, aligned=True, center_to_corner=np.zeros(2), origin_basic=False)
+        stream = open_radar(args)
+        try:
+            current = stream.wait()
+            if current is None:
+                suspend_for_radar(watch)
+                message = radar_pose_text(None) + '；' + stream.error
+                print(message)
+                return [message]
+            pose = current
+        finally:
+            stream.close()
     color = depth = None
     if args.image:
         color, depth = _read_image(args.image)
     watch.update(pose, color, depth)
     lines = watch.lines(args.mode)
+    if getattr(args, "pose_source", None) in ("radar", "ros", "laptop", "host"):
+        lines = [radar_pose_text(pose)] + lines
     text = "\n".join(lines)
     if text:
         print(text)
@@ -715,39 +718,26 @@ def _once(args, watch: FieldWatch, pose: CarPose) -> list[str]:
 
 
 def run_basic(args) -> list[str]:
-    # 实地基础：右前角在场地原点右侧 1.2 m，前后对齐，车头朝前。俯仰用支架上人设的角度。
-    loaded = load_setup(str(ROOT / "config" / "field.yaml"))
-    pitch = loaded.pitch_deg if args.pitch is None else float(args.pitch)
-    setup, pose = basic_origin_setup(pitch)
-    intr = load_intrinsics(str(ROOT / "config" / "intrinsics.yaml"))
-    watch = FieldWatch(setup, intr)
-    watch.pitch = setup.pitch_deg
-    if args.image or args.once:
-        return _once(args, watch, pose)
-    return _live(args, watch, pose)
+    # 基础要求相机静止；统一走静态流程，只有 extend 启动自主移动。
+    from static_test import run_static
+    return run_static(args)
 
 
 def run_extend(args) -> list[str]:
-    # 实地拓展：车位来自雷达话题。没对齐或安装差还没量，只提示，不投影。
+    normalize_source(args)
+    # 实地拓展统一读取雷达右前角位姿。
     setup = _setup_from_args(args)
     intr = load_intrinsics(str(ROOT / "config" / "intrinsics.yaml"))
     watch = FieldWatch(setup, intr)
     watch.pitch = setup.pitch_deg
     pose = _pose_from_args(args, setup.yaw_unit)
     if args.image or args.once:
-        if getattr(args, "pose_source", "ssh") == "ros" and args.pose_is_default and setup.topic:
-            listened = _subscribe(setup.topic, setup.yaw_unit)
-            if listened is not None:
-                pose = listened
         return _once(args, watch, pose)
-    if getattr(args, "pose_source", "ssh") == "ros" and args.pose_is_default and setup.topic:
-        listened = _subscribe(setup.topic, setup.yaw_unit)
-        if listened is not None:
-            pose = listened
     return _live(args, watch, pose)
 
 
 def run(args) -> list[str]:
+    normalize_source(args)
     if args.mode == "static":
         from static_test import run_static
         return run_static(args)
@@ -759,8 +749,8 @@ def run(args) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="识别四块建塔格的状态")
     parser.add_argument("mode", choices=("basic", "extend", "static"))
-    parser.add_argument("--pose-source", choices=("ssh", "local", "ros", "static"), default="ssh")
-    parser.add_argument("--verify-motion", action="store_true", help="慢速验证：直接采用 CAN 右前角场地位姿并显示相对变化")
+    parser.add_argument("--pose-source", choices=("laptop", "host", "radar", "ros", "ssh", "local", "static"), default="laptop")
+    parser.add_argument("--verify-motion", action="store_true", help="显示雷达位姿相对起始位置的变化")
     parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
     parser.add_argument("--can-interface", default="can0")
     parser.add_argument("--image", default="")
@@ -768,7 +758,7 @@ def main() -> None:
     parser.add_argument("--pitch", type=float, default=None)
     parser.add_argument("--aligned", action="store_true")
     parser.add_argument("--center-to-corner", nargs=2, type=float, default=None, metavar=("X", "Y"))
-    parser.add_argument("--topic", default="")
+    add_radar_arguments(parser)
     parser.add_argument("--yaw-unit", choices=("rad", "deg"), default="")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()

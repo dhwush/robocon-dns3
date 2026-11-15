@@ -21,6 +21,7 @@ LOOK_SECONDS = 30.0
 NO_PROGRESS_SECONDS = 10.0
 STATION_RESET_M = 0.10
 PITCH_RECHECK_DEG = 4.0
+STOP_HOLD_SECONDS = 1.0
 
 
 @dataclass
@@ -84,18 +85,63 @@ class AutonomousSurvey:
         self.anchor_roll = None
         self.station_pose = None
         self.heading_centers = {}
+        self.sampling_suspended_at = None
         self.last_update = None
         self.message = "等待相机稳定"
         self.blocked_until = 0.0
         self.primary_stops = None
         self.primary_line = []
         self.primary_index = 1
+        self.reserve_stops = []
+        self.reserve_index = 0
+        self.manual_confirmed = set()
+        self.observations = []
+        self.distance_m = 0.0
+        self.distance_pose = watch.last_pose
+        self.stop_until = None
+        self.stop_message = ""
+
+    def confirmation_target(self):
+        action = self.action
+        if action is None or action.kind != 'wait' or action.cell in self.manual_confirmed:
+            return None
+        view = self.watch.views[action.cell]
+        if not self.watch.have_color or self.watch.stable_frames < OBS_STABLE_FRAMES or not view.in_view:
+            return None
+        # 只确认画面当前显示的结论，不把旧锁定值当成本帧结果。
+        if view.conclusion is None or view.skip_vote or view.needs_yaw or view.needs_pitch:
+            return None
+        return action.cell, view.conclusion
+
+    def confirm_current(self, target):
+        if target is None or target != self.confirmation_target():
+            return False
+        name, result = target
+        vote = self.watch.votes[name]
+        previous = vote.locked
+        vote.locked, vote.recheck, vote.ready = result, False, False
+        self.manual_confirmed.add(name)
+        self.conflicts.pop(name, None)
+        self.conflict_results.pop(name, None)
+        self.evidence[name].clear()
+        self._record(name, 'manual_confirmed', result, self.clock(), previous)
+        self.look_key = self.look_started = None
+        self.action = None
+        self._schedule(self.clock())
+        return True
+
+    def metrics(self):
+        return dict(distance_m=round(self.distance_m, 3),
+                    observation_count=len(self.observations),
+                    observations=self.observations,
+                    manual_confirmed=[n for n in DISPLAY if n in self.manual_confirmed])
 
     @property
     def complete(self):
         return all(v.locked is not None and not v.recheck for v in self.watch.votes.values())
 
     def pause(self):
+        self.sampling_suspended_at = None
         self.pitch_checks = {name: [] for name in DISPLAY}
         for evidence in self.evidence.values():
             evidence.clear()
@@ -104,8 +150,19 @@ class AutonomousSurvey:
         self.anchor = None
         self.action = None
         self.station_pose = None
+        self.stop_until = None
+        self.stop_message = ""
         self.heading_centers.clear()
         self.attempts = {name: 0 for name in DISPLAY}
+
+    def suspend_sampling(self):
+        """位姿暂缺时丢弃本档稳定段，保留观察点、动作和扫描进度。"""
+        if self.sampling_suspended_at is None:
+            self.sampling_suspended_at = self.clock()
+        for evidence in self.evidence.values():
+            evidence.clear()
+        self.anchor = None
+        self.message = '停止！等待有效位姿，暂停采样并保留扫描进度'
 
     def _reset_station(self, pose):
         self.station_pose = pose
@@ -158,15 +215,51 @@ class AutonomousSurvey:
         return (math.hypot(pose.x-old[0], pose.y-old[1]) >= 0.02
                 or abs(turn) >= 5 or abs(watch.pitch-old[3]) >= 3)
 
+    def _stop_at_arrival(self, now):
+        """先发停止并留出反应时间，停稳后才能采样或下发下一动作。"""
+        action = self.action
+        if action is None or action.kind not in ('move', 'yaw', 'pitch'):
+            return False
+        if self.stop_until is None:
+            if not self.watch._arrived(action):
+                return False
+            words = {'move': '本段移动到位', 'yaw': '完成旋转', 'pitch': '俯仰到位'}
+            self.stop_message = words[action.kind] + '，可以了，停止！保持车身和相机不动，等待稳定'
+            self.stop_until = now + STOP_HOLD_SECONDS
+        if now < self.stop_until or self.watch.stable_frames < OBS_STABLE_FRAMES:
+            for evidence in self.evidence.values():
+                evidence.clear()
+            self.message = self.stop_message
+            return True
+        self.stop_until = None
+        self.stop_message = ''
+        if not self.watch._arrived(action):
+            return False
+        if action.kind == 'move':
+            self._reset_station(self.watch.last_pose)
+        else:
+            self.action = None
+        return False
+
     def update(self):
         watch = self.watch
         now = self.clock()
         pose = watch.last_pose
+        if self.distance_pose is not None:
+            self.distance_m += math.hypot(pose.x-self.distance_pose.x, pose.y-self.distance_pose.y)
+        self.distance_pose = pose
+        if self.sampling_suspended_at is not None:
+            if self.look_started is not None:
+                self.look_started += now - self.sampling_suspended_at
+            self.sampling_suspended_at = None
+            self.last_update = None
         if self.last_update is not None and now-self.last_update > MAX_FRAME_GAP:
             for evidence in self.evidence.values():
                 evidence.clear()
             self.anchor = None
         self.last_update = now
+        if self._stop_at_arrival(now):
+            return
         if self.station_pose is None:
             self.station_pose = pose
             self._freeze_headings(pose)
@@ -202,6 +295,9 @@ class AutonomousSurvey:
             return
         for name, view in watch.views.items():
             evidence = self.evidence[name]
+            if name in self.manual_confirmed:
+                evidence.clear()
+                continue
             vote = watch.votes[name]
             if not view.in_view or view.needs_yaw or view.needs_pitch:
                 evidence.clear()
@@ -291,6 +387,7 @@ class AutonomousSurvey:
             self.action = None
         if self.primary_stops is None:
             self.primary_stops, self.primary_line = primary_route(pose,offset,intr)
+            self.reserve_stops = list(getattr(self.primary_stops, "reserve", ()))
         while self.primary_index < len(self.primary_stops):
             stop = self.primary_stops[self.primary_index]
             if math.hypot(stop.x-pose.x,stop.y-pose.y) > .08:
@@ -298,8 +395,8 @@ class AutonomousSurvey:
             self.primary_index += 1
         pending = [n for n in DISPLAY if watch.votes[n].locked is None or watch.votes[n].recheck]
         if not pending:
-            self.action = Action("stop", "全部区域已自动确认")
-            self.message = "全部区域已自动确认"
+            self.action = Action("stop", "停止！全部区域已自动确认")
+            self.message = "停止！全部区域已自动确认，保持车身和相机不动"
             return
         cells = {cell.name: cell for cell in tower_cells()}
         # 保持正在积累的观察段；其余任务比较下一可执行姿态的实际转角。
@@ -339,6 +436,9 @@ class AutonomousSurvey:
                 key = (name, self.attempts[name])
                 if key != self.look_key:
                     self.look_key, self.look_started = key, now
+                    self.observations.append(dict(cell=name, attempt=action.attempt,
+                        x=pose.x, y=pose.y, yaw_deg=math.degrees(pose.yaw),
+                        pitch_deg=watch.pitch, elapsed_s=now-self.started))
                 progress = self.evidence[name].windows
                 self.message = f"{TOWER_NO[name]}号：俯仰复核{len(self.pitch_checks[name])}/{self.required_checks(name)}档；本档稳定{progress}/{CONFIRM_WINDOWS}段（每段至少{WINDOW_SECONDS:g}秒）"
                 if view.conclusion is None:
@@ -368,7 +468,24 @@ class AutonomousSurvey:
                 self.look_key = self.look_started = None
                 return
             self.primary_index += 1
-        # 主线用尽仍未确认的塔，才规划近距兜底。
+        # 主线用尽仍有未确认目标时，先尝试保留的沿途备用点，再规划远处兜底。
+        while self.reserve_index < len(self.reserve_stops):
+            stop = self.reserve_stops[self.reserve_index]
+            if math.hypot(stop.x-pose.x, stop.y-pose.y) <= .08:
+                self.reserve_index += 1
+                continue
+            useful = tuple(n for n in pending if (
+                fits_when_aimed(cells[n], CarPose(stop.x,stop.y,pose.yaw),offset,intr)
+                or fits_rgb_when_aimed(cells[n], CarPose(stop.x,stop.y,pose.yaw),offset,intr)))
+            trip = _travel(pose.x,pose.y,stop.x,stop.y,[],pose.yaw) if useful else None
+            if trip is not None:
+                self.action = _move_toward(pose,stop.x,stop.y,trip[1],'reserve',useful)
+                if self.action is not None:
+                    self.message = "主线仍有未确认目标→沿途备用点；只复测剩余目标"
+                    self.look_key = self.look_started = None
+                    return
+            self.reserve_index += 1
+        # 备用点也用尽，才规划近距兜底。
         references = {}
         origin = camera_position(pose, offset, 0.)
         for name in pending:
@@ -418,6 +535,12 @@ class AutonomousSurvey:
                 rows.append(f"最近{TOWER_NO[name]}号冲突已解决：{words.get(last['previous'], last['previous'])}→{words.get(last['result'], last['result'])}，两档一致，已写入结果")
         rows.append(self.message)
         action = self.action
+        if self.stop_until is not None:
+            return rows
+        if action is not None and action.kind == "wait":
+            rows.append("停止！保持车身和相机不动，正在观察")
+        elif action is not None and action.kind == "blocked":
+            rows.append("停止！暂无安全有效观察点，等待后续指令")
         if action is not None and action.kind in ("move", "yaw", "pitch", "wait"):
             pose = watch.last_pose
             x = action.x if action.x is not None else pose.x
@@ -430,7 +553,7 @@ class AutonomousSurvey:
             if action.kind == "yaw":
                 turn = math.degrees(math.atan2(math.sin(yaw-pose.yaw), math.cos(yaw-pose.yaw)))
                 if abs(turn) <= 3.0:
-                    rows.append("车头已对准，停稳后测量（允许误差±3°）")
+                    rows.append("可以了，停止！车头已对准（允许误差±3°）")
                 else:
                     rows.append(f"现在向{'左' if turn > 0 else '右'}转{abs(turn):.0f}°，车头转到{heading_words(math.degrees(yaw))}")
             if action.kind == "pitch":
@@ -464,13 +587,19 @@ class AutonomousSurvey:
             active = [(self.watch.last_pose.x,self.watch.last_pose.y),(a.x,a.y)]
         return dict(points=points, line=self.primary_line, active=active,
                     index=self.primary_index, complete=self.complete,
-                    kinds=[s.kind for s in self.primary_stops or []])
+                    kinds=[s.kind for s in self.primary_stops or []],
+                    reserve_points=[(s.x,s.y) for s in self.reserve_stops],
+                    reserve_index=self.reserve_index)
 
     def snapshot(self):
         return dict(coordinates="场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
                     next_action=asdict(self.action) if self.action is not None else None,
                     pending=[n for n,v in self.watch.votes.items() if v.locked is None or v.recheck],
                     complete=self.complete, results={n: v.locked for n,v in self.watch.votes.items()},
+                    route_plan=dict(primary=[asdict(s) for s in self.primary_stops or []],
+                                    reserve=[asdict(s) for s in self.reserve_stops],
+                                    reserve_index=self.reserve_index),
+                    metrics=self.metrics(),
                     pitch_checks=self.pitch_checks,
                     conflicts=[n for n,v in self.watch.votes.items() if v.recheck],
                     conflict_results=self.conflict_results, history=self.history,

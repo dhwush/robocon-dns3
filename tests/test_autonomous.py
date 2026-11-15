@@ -3,6 +3,7 @@ import math
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import autonomous
 from autonomous import AutonomousSurvey, Evidence
@@ -346,6 +347,7 @@ def test_slow_translation_uses_fixed_station_origin_and_waits_for_stability(monk
     survey.update()
     assert survey.attempts[name] == 3
     watch.stable_frames = 3
+    clock.now += autonomous.STOP_HOLD_SECONDS + .1
     survey.update()
     assert survey.attempts[name] == 0
     assert survey.pitch_checks[name] == []
@@ -369,6 +371,7 @@ def test_commanded_small_move_resets_only_after_arrival(monkeypatch):
     survey.update()
     assert survey.attempts[name] == 3
     watch.stable_frames = 3
+    clock.now += autonomous.STOP_HOLD_SECONDS + .1
     survey.update()
     assert survey.attempts[name] == 0
     assert survey.pitch_checks[name] == []
@@ -397,6 +400,10 @@ def test_heading_targets_remain_fixed_despite_live_pose_changes(monkeypatch):
 def test_window_shows_pitch_sequence_and_cross_check_progress(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     observe(survey, clock, 7)
+    assert '停止！' in '\n'.join(survey.lines())
+    watch.pitch = 8.
+    clock.now += autonomous.STOP_HOLD_SECONDS + .1
+    survey.update()
     text = '\n'.join(survey.lines())
     assert '俯仰复核1/2档' in text
     assert '每个朝向的相机姿态' in text
@@ -469,12 +476,12 @@ def test_schedule_prefers_smaller_next_turn_and_preserves_active_observation(mon
     assert survey.action.cell == first
 
 
-def test_pitch_arrival_accepts_five_degrees_but_not_more():
+def test_pitch_arrival_accepts_three_degrees_but_not_more():
     from report import FieldWatch
-    watch = SimpleNamespace(last_pose=CarPose(0,0,0), pitch=11.)
+    watch = SimpleNamespace(last_pose=CarPose(0,0,0), pitch=9.)
     action = Action('pitch', '', pitch=6.)
     assert FieldWatch._arrived(watch, action)
-    watch.pitch = 11.1
+    watch.pitch = 9.1
     assert not FieldWatch._arrived(watch, action)
 
 
@@ -603,7 +610,7 @@ def test_primary_stations_run_before_far_fallback(monkeypatch):
     survey.anchor = CarPose(0,0,0)
     survey.anchor_pitch = survey.anchor_roll = 0.
     watch.last_pose = CarPose(.5,0,0)
-    observe(survey,clock,1)
+    observe(survey,clock,autonomous.STOP_HOLD_SECONDS + .3)
     assert survey.primary_index == 2
     assert survey.action.kind == 'wait'
 
@@ -621,3 +628,171 @@ def test_primary_path_is_short_and_every_station_has_looks():
     assert {look.number for look in stops[0].looks} >= {'3','6'}
     assert all(motion._parking_clear(s.x,s.y,pose.yaw) for s in stops)
     assert all(motion._path_clear(*a,*b,pose.yaw) for a,b in zip(line,line[1:]))
+
+
+def test_pose_dropout_preserves_scan_target_and_freezes_wait_timer(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    survey.attempts[name] = 3
+    survey.pitch_checks[name] = [dict(result='蓝', pitch=0.)]
+    survey.action = Action('wait', '', cell=name, attempt=3, yaw=math.radians(23))
+    survey.look_key = (name, 3)
+    survey.look_started = clock.now
+    survey.heading_centers[name] = 15.
+    survey.evidence[name].windows = 2
+    target = survey.action
+    survey.suspend_sampling()
+    clock.now += 20
+    survey.suspend_sampling()
+    assert survey.evidence[name].windows == 0
+    assert survey.action == target
+    assert survey.look_key == (name, 3)
+    watch.last_pose = CarPose(.04, -.03, math.radians(23))
+    survey.update()
+    assert survey.attempts[name] == 3
+    assert survey.pitch_checks[name] == [dict(result='蓝', pitch=0.)]
+    assert survey.heading_centers[name] == 15.
+    assert survey.look_started == clock.now
+    assert survey.station_pose == CarPose(0, 0, 0)
+    assert survey.sampling_suspended_at is None
+
+
+def test_pose_dropout_does_not_hide_large_translation(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    survey.attempts[name] = 3
+    survey.pitch_checks[name] = [dict(result='蓝', pitch=0.)]
+    survey.suspend_sampling()
+    clock.now += 2
+    watch.last_pose = CarPose(.15, 0, 0)
+    watch.stable_frames = 0
+    survey.update()
+    assert survey.attempts[name] == 3
+    watch.stable_frames = 3
+    survey.update()
+    assert survey.attempts[name] == 0
+    assert survey.pitch_checks[name] == []
+    assert survey.station_pose.x == .15
+
+
+def test_manual_confirmation_skips_later_conflicts(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    survey.update()
+    target = survey.confirmation_target()
+    assert target == (name, '1')
+    assert survey.confirm_current(target)
+    assert watch.votes[name].locked == '1'
+    assert name in survey.manual_confirmed
+    watch.views[name].conclusion = '2'
+    observe(survey, clock, 10)
+    assert watch.votes[name].locked == '1'
+    assert not watch.votes[name].recheck
+    assert survey.history[name][-1]['event'] == 'manual_confirmed'
+    assert survey.action.cell != name
+
+
+def test_manual_confirmation_rejects_stale_result(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    survey.update()
+    target = survey.confirmation_target()
+    watch.views[name].conclusion = '2'
+    assert not survey.confirm_current(target)
+    assert not survey.manual_confirmed
+
+
+def test_observation_count_is_per_started_attempt_not_frame(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    observe(survey, clock, 1)
+    assert survey.metrics()['observation_count'] == 1
+    watch.last_pose = CarPose(.03, .04, 0)
+    survey.update()
+    assert survey.metrics()['distance_m'] == .05
+    assert survey.snapshot()['metrics']['observations'][0]['cell'] == name
+    survey.pause()
+    assert survey.metrics()['observation_count'] == 1
+
+
+@pytest.mark.parametrize('kind', ['move', 'yaw', 'pitch'])
+def test_arrival_announces_stop_before_stability_and_next_action(monkeypatch, kind):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    survey.station_pose = watch.last_pose
+    survey.action = Action(kind, '执行动作', cell=name, x=0., y=0., yaw=0., pitch=0.)
+    watch.stable_frames = 0
+    survey.update()
+    assert survey.stop_until is not None
+    assert '停止！' in '\n'.join(survey.lines())
+    assert '下一步' not in '\n'.join(survey.lines())
+    assert survey.action.kind == kind
+    assert not survey.evidence[name].samples
+    clock.now += 1.1
+    survey.update()
+    assert survey.stop_until is not None  # 时间够了但仍未停稳，不下发下一动作。
+    watch.stable_frames = 10
+    survey.update()
+    assert survey.stop_until is None
+    assert survey.action.kind == 'wait'
+    assert '停止！' in '\n'.join(survey.lines())
+
+
+def test_primary_route_keeps_one_intermediate_and_one_reserve():
+    import motion
+    stops, line = motion.primary_route(CarPose(0,0,0), np.zeros(2),
+                                      load_intrinsics('config/intrinsics.yaml'))
+    assert [s.kind for s in stops] == ['A起点', '沿途复看', 'B近点']
+    assert len(stops.reserve) == 1
+    reserve = stops.reserve[0]
+    assert reserve.kind == '沿途备用'
+    assert reserve not in stops
+    assert reserve.looks
+    assert motion._parking_clear(reserve.x, reserve.y, 0.)
+    # 沿途主用/备用仍取原折线的1/3、2/3位置，不新增坐标或姿态。
+    length = sum(math.dist(a,b) for a,b in zip(line,line[1:]))
+    expected = []
+    for fraction in (1/3, 2/3):
+        remaining = fraction*length
+        for a, b in zip(line, line[1:]):
+            span = math.dist(a,b)
+            if span and remaining <= span:
+                expected.append((a[0]+(b[0]-a[0])*remaining/span,
+                                 a[1]+(b[1]-a[1])*remaining/span))
+                break
+            remaining -= span
+    assert all(any(math.dist((s.x,s.y),p) < 1e-8 for p in expected)
+               for s in (stops[1], reserve))
+
+
+def test_reserve_runs_after_primary_before_fallback_and_only_once(monkeypatch):
+    from motion import RouteStop
+    survey, watch, clock, name = make_survey(monkeypatch)
+    for n, vote in watch.votes.items():
+        if n != name:
+            vote.locked = '1'
+    survey.primary_stops = [RouteStop(0,0,(),'A起点')]
+    survey.reserve_stops = [RouteStop(.5,0,(),'沿途备用')]
+    survey.attempts[name] = autonomous.MAX_TRIES
+    monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda c,*args: c.name == name)
+    monkeypatch.setattr(autonomous, '_travel', lambda x,y,a,b,*args: (abs(a-x), [(x,y),(a,b)]))
+    survey._schedule(clock())
+    assert survey.action.kind == 'move'
+    assert survey.action.chase_to == 'reserve'
+    assert survey.action.cells == (name,)
+    watch.last_pose = CarPose(.5,0,0)
+    survey.action = None
+    survey._schedule(clock())
+    assert survey.reserve_index == 1
+    assert survey.action.kind == 'blocked'
+    assert survey.route_display()['reserve_points'] == [(.5,0)]
+
+
+def test_completed_survey_does_not_visit_reserve(monkeypatch):
+    from motion import RouteStop
+    survey, watch, clock, name = make_survey(monkeypatch)
+    survey.primary_stops = []
+    survey.reserve_stops = [RouteStop(.5,0,(),'沿途备用')]
+    for vote in watch.votes.values():
+        vote.locked = '1'
+    survey._schedule(clock())
+    assert survey.action.kind == 'stop'
+    assert survey.reserve_index == 0

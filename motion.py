@@ -23,7 +23,7 @@ from sight import visible_height
 
 # 正中：方位和目标俯仰都进到这个范围里，才开始记这一格。
 CENTER_DEG = 5.0
-PITCH_TOL_DEG = 5.0
+PITCH_TOL_DEG = 3.0
 # 每个航向都测基准、抬高8度和降低8度；共21个姿态。
 YAW_TOL_DEG = 3.0
 SCAN_YAWS = (0.0, 8.0, -8.0, 16.0, -16.0, 24.0, -24.0)
@@ -55,6 +55,13 @@ class RouteStop:
     y: float
     looks: tuple[Look, ...]
     kind: str = "兜底"
+
+
+class RouteStops(list):
+    """主线点序列，备用点独立保存，不计入必经点。"""
+    def __init__(self, stops=(), reserve=()):
+        super().__init__(stops)
+        self.reserve = tuple(reserve)
 
 
 @dataclass(frozen=True)
@@ -696,7 +703,7 @@ def _relocate(
 
 
 def primary_route(pose, offset, intr):
-    """起点A、沿途两次停稳复看、1.4米内近点B；不预先承诺远处塔型。"""
+    """起点A、一个沿途复看点、近点B；另一个沿途点保留备用。"""
     cells = _cells()
     def targets(stood):
         return tuple(n for n,c in cells.items() if fits_rgb_when_aimed(c,stood,offset,intr))
@@ -720,9 +727,9 @@ def primary_route(pose, offset, intr):
             if best is None or rank < best[0]:
                 best = rank,stood,names,trip[1],trip[0]
     if best is None:
-        return [start], [(pose.x,pose.y)]
+        return RouteStops([start]), [(pose.x,pose.y)]
     _,stood,names,line,length = best
-    stops = [start]
+    candidates = []
     # 沿规划折线插入停靠点，禁止把绕障折线直接连成穿台捷径。
     for fraction in (1/3,2/3):
         remaining = length*fraction
@@ -739,7 +746,17 @@ def primary_route(pose, offset, intr):
         paused = CarPose(*point,pose.yaw)
         observed = targets(paused)
         if observed:
-            stops.append(RouteStop(*point,_looks(paused,offset,intr,observed),'沿途复看'))
+            candidates.append(RouteStop(*point,_looks(paused,offset,intr,observed),'沿途复看'))
+    # 优先覆盖起点无法看清的目标，再比较近距可测数；平局保留较早的点。
+    start_numbers = {look.number for look in start.looks}
+    def value(stop):
+        visible = {look.number for look in stop.looks}
+        near = sum(fits_when_aimed(cells[n], CarPose(stop.x, stop.y, pose.yaw), offset, intr)
+                   for n in cells)
+        return len(visible-start_numbers), near, len(visible)
+    chosen = max(candidates, key=value) if candidates else None
+    reserve = [replace(stop, kind='沿途备用') for stop in candidates if stop is not chosen]
+    stops = RouteStops([start] + ([chosen] if chosen is not None else []), reserve)
     stops.append(RouteStop(stood.x,stood.y,_looks(stood,offset,intr,names),'B近点'))
     return stops,line
 
@@ -795,9 +812,9 @@ def _aim_cell(
         faced = turned_pose(pose, pose.yaw - math.radians(turn))
         if intr is not None and not _sees(cell, faced, offset, goal_pitch, intr):
             continue
-        if abs(turn) > YAW_TOL_DEG:
+        if abs(turn) > YAW_TOL_DEG + 1e-9:
             return _turn_action(pose, name, turn, index)
-        if abs(goal_pitch - pitch) > PITCH_TOL_DEG:
+        if abs(goal_pitch - pitch) > PITCH_TOL_DEG + 1e-9:
             if intr is not None and not _sees(cell, pose, offset, goal_pitch, intr):
                 continue
             return _pitch_action(name, goal_pitch, index)

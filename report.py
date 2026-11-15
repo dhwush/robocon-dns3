@@ -31,7 +31,7 @@ LEVEL_LOCK = {
     "bright": {"exposure": 25, "gain": 0, "brightness": -16},
     "daylight": {"exposure": 50, "gain": 16, "brightness": 0},
     "indoor": {"exposure": 150, "gain": 28, "brightness": 0},
-    "dim": {"exposure": 400, "gain": 48, "brightness": 12},
+    "dim": {"exposure": 220, "gain": 32, "brightness": 0},
     "dark": {"exposure": 1200, "gain": 72, "brightness": 24},
 }
 
@@ -456,15 +456,19 @@ class FieldWatch:
         if pose is None:
             return False
         if hold.kind == "pitch":
-            return abs(self.pitch - float(hold.pitch)) <= PITCH_TOL_DEG
+            return abs(self.pitch - float(hold.pitch)) <= PITCH_TOL_DEG + 1e-9
         if hold.kind == "yaw":
             turn = math.atan2(math.sin(pose.yaw - float(hold.yaw)), math.cos(pose.yaw - float(hold.yaw)))
-            return abs(math.degrees(turn)) <= YAW_TOL_DEG
+            return abs(math.degrees(turn)) <= YAW_TOL_DEG + 1e-9
         if hold.kind == "move":
             return math.hypot(pose.x - float(hold.x), pose.y - float(hold.y)) <= MOVE_ARRIVE_M
         return True
 
     def _held(self, action) -> str | None:
+        if self.hold is not None and self.hold.kind in ("pitch", "yaw") and self._arrived(self.hold):
+            label = "俯仰" if self.hold.kind == "pitch" else "旋转"
+            self.hold = None
+            return label + "可以了，停止！（误差不超过3°）"
         if action is None or action.kind in ("wait", "idle"):
             self.hold = None
             return None
@@ -476,4 +480,3 @@ class FieldWatch:
         self.hold = action
         self._remember_goal(action)
         return action.text
-

@@ -7,7 +7,7 @@ from motion import _path_clear, _parking_clear, _travel, _bypass_points, _fallba
 
 def test_corner_camera_rotates_installation_offset():
     pose = CarPose(1., 2., math.pi/2)
-    np.testing.assert_allclose(camera_position(pose, np.zeros(2), 0), [.95, 1.789, .669])
+    np.testing.assert_allclose(camera_position(pose, np.zeros(2), 0), [.95, 1.789, .675])
 
 
 def test_in_place_turn_preserves_body_center():

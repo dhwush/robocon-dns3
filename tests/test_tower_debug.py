@@ -86,7 +86,8 @@ def test_live_window_groups_targets_can_results_and_footer():
         votes={n: Vote() for n in DISPLAY})
     watch.autonomy = SimpleNamespace(action=Action('pitch','',pitch=10.,cell=name,attempt=1),
         pitch_checks={n: [] for n in DISPLAY}, message='等待相机稳定', complete=False,
-        heading_center=lambda name: 0.)
+        heading_center=lambda name: 0.,
+        metrics=lambda: dict(observation_count=0, distance_m=0.))
     panels = live_panels(watch,CarPose(0,0,0),'ssh',['光线：室内'])
     assert any('CAN' in row for row in panels['left'])
     assert any('车头朝向' in row for row in panels['left'])

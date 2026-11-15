@@ -29,18 +29,18 @@ from field_map import MARGIN_M, Cell, tower_cells
 from sight import sees, visible_height
 
 
-# 白：饱和度不超过 110，明度不低于 118。6 号盒面偏暗的地方大约 122，125 收不进。
-# 红的色相仍是 0–8 和 172–180，明度放到 110，罩住这张画面里大约 118 的红。
+# 白盒阴影保留到 V=105，减少为补亮白盒而把顶块曝白的需要。
+# 红保持窄色相，允许高亮时饱和度降到120；尺寸/高度/两色关系仍需通过。
 # 蓝的色相仍是 105–130，饱和度放到 110，罩住这张画面里大约 113 的蓝。
 WHITE_S = 110
-WHITE_V = 118
+WHITE_V = 105
 # 黄地面色相大约 16，亮处大约 12–19，饱和度大约 49，明度大约 135。
 # 这块地上的阴影色相大约 19，大约 13–24，饱和度大约 27，明度大约 113。色相还是黄，靠明度分开。
 # 饱和度达到 48 的黄才从白里拿掉，盒边大约 40 的黄留着。盒子底边连着格子外面的地板，所以整幅都拿。
 FLOOR_H = (10, 26)
 FLOOR_S = 48
-RED = ((0, 150, 110), (8, 255, 255))
-RED_WRAP = ((172, 150, 110), (180, 255, 255))
+RED = ((0, 120, 110), (8, 255, 255))
+RED_WRAP = ((172, 120, 110), (180, 255, 255))
 BLUE = ((105, 110, 50), (130, 255, 255))
 
 WIDTH_M = 0.35
@@ -1300,10 +1300,20 @@ def _classify_cell(
     region = _outline(mask)
     reason = None
     diagnostic = {}
+    rgb_cap = None
 
     def pack(conclusion, frac: float, mean_v: float, piece=None, method=None, hold=False, skip=False) -> CellView:
         # 深度已经量到、彩色又没把整块看全的格，先留在这里记满 15 帧。
         shown_reason = reason
+        diagnostic['white_reading'] = dict(
+            result=conclusion if conclusion in ('1', '2') else None,
+            method=method, reason=reason)
+        if conclusion in ('1', '2') and piece is not None:
+            diagnostic['white_piece'] = piece
+        if rgb_cap is not None:
+            # 顶块与白盒都运行检测；白盒失败不能否定独立通过校验的顶块。
+            conclusion, piece = rgb_cap
+            method, hold, skip = 'RGB顶块', False, False
         if conclusion is None and diagnostic.get("needs_parallax"):
             detail = diagnostic.get("far_white", {}).get("reason", "证据不足，需要侧向视角")
             shown_reason = detail + (("；" + reason) if reason else "")
@@ -1341,9 +1351,6 @@ def _classify_cell(
     if color_usable:
         rgb_cap = _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr,
                                    z_cam, roll, diagnostic)
-        if rgb_cap is not None:
-            state, piece = rgb_cap
-            return pack(state, frac, mean_v, piece, "RGB顶块")
     clipped = False
     overwide = False
     missed_shape = False
@@ -1357,8 +1364,8 @@ def _classify_cell(
         reason = "前景遮挡：近处杂物盖住建塔区域"
         return pack(None, frac, mean_v, skip=True)
     if z_cam > _DEPTH_FAR_M and color_usable:
-        far_cap = _far_cap_reading(cell, color, white, depth, mask, pose, offset,
-                                   pitch, intr, z_cam, roll, diagnostic)
+        far_cap = None if rgb_cap is not None else _far_cap_reading(
+            cell, color, white, depth, mask, pose, offset, pitch, intr, z_cam, roll, diagnostic)
         if far_cap is not None:
             state, piece = far_cap
             return pack(state, frac, mean_v, piece, "远处融合")
@@ -1423,6 +1430,8 @@ def _classify_cell(
                     clipped = True
                     continue
             accepted.append((x, y, w, h, distance, component, top_z))
+    diagnostic['white_candidates'] = [_outline(item[5].astype(np.uint8)*255)
+                                       for item in accepted] if rgb_cap is not None else []
     depth_state, depth_piece, saw_outside, cap_unclear = _depth_on_cell(
         cell, cloud, mask, intr, color, blocked, labels, pose, offset, pitch, roll,
         diagnostic=diagnostic,

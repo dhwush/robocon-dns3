@@ -117,7 +117,7 @@ def test_start_camera_stays_on_the_known_optical_center():
     place = camera_position(START, OFFSET, 0.0)
     assert abs(place[0] + 0.211) < 1e-6
     assert abs(place[1] - 0.05) < 1e-6
-    assert abs(place[2] - 0.669) < 1e-6
+    assert abs(place[2] - 0.675) < 1e-6
 
 
 def _basic():
@@ -787,6 +787,7 @@ def test_extend_without_alignment_prints_only_the_warning():
 
 def _field_args(**overrides):
     values = {
+        "offline": True,
         "mode": "basic",
         "image": "",
         "pose": [0.0, 0.0, 0.0],
@@ -802,7 +803,7 @@ def _field_args(**overrides):
     return type("Args", (), values)()
 
 
-def test_basic_field_at_origin_does_not_use_radar():
+def test_offline_basic_field_uses_fixed_origin():
     from car_pose import basic_origin_setup, camera_position
 
     setup, pose = basic_origin_setup(0.0)
@@ -812,7 +813,7 @@ def test_basic_field_at_origin_does_not_use_radar():
     assert abs(pose.yaw) < 1e-6
     assert abs(place[0] - (1.2 - 0.211)) < 1e-6
     assert abs(place[1] - 0.05) < 1e-6
-    assert abs(place[2] - 0.669) < 1e-6
+    assert abs(place[2] - 0.675) < 1e-6
     assert setup.topic == ""
     assert setup.aligned is False
     watch = FieldWatch(setup, INTR)
@@ -836,10 +837,12 @@ def test_basic_field_at_origin_does_not_use_radar():
     assert "第三行左侧 0" not in lines
     assert "车位还没对齐" not in lines
     assert all("平移" not in line and "度" not in line for line in lines)
-    assert run(_field_args(mode="basic", topic="/radar/odom")) == []
+    output = run(_field_args(mode="basic", topic="/radar/odom"))
+    assert any("保持车身和相机不动" in row for row in output)
+    assert all("下一步" not in row for row in output)
 
 
-def test_extend_field_still_waits_for_radar():
+def test_offline_extend_still_requires_alignment():
     lines = run(_field_args(mode="extend"))
     assert lines == ["车位还没对齐"]
 
@@ -1417,6 +1420,7 @@ def test_cli_basic_once_does_not_ask_the_referee_to_move():
             (),
             {
                 "mode": "basic",
+                    "offline": True,
                 "image": "",
                 "pose": [0.0, 0.0, 0.0],
                 "pitch": 0.0,
@@ -1429,4 +1433,5 @@ def test_cli_basic_once_does_not_ask_the_referee_to_move():
             },
         )()
     )
-    assert lines == []
+    assert any("保持车身和相机不动" in row for row in lines)
+    assert all("下一步" not in row and "要求" not in row for row in lines)

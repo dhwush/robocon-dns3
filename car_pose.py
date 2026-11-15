@@ -8,11 +8,14 @@ import numpy as np
 import yaml
 
 
-# 光心相对右前角：左侧 0.211 m，前方 0.05 m，上方 0.669 m。
+# 光心相对右前角：左侧 0.211 m，前方 0.05 m，上方 0.675 m。
 BODY_SIDE_M = 0.35
 BODY_HALF_M = BODY_SIDE_M / 2.0
-CAMERA_HEIGHT_M = 0.669
+CAMERA_HEIGHT_M = 0.675
 OPTICAL_FROM_CORNER = np.array([-0.211, 0.05, CAMERA_HEIGHT_M], dtype=float)
+
+# 雷达参考点相对右前角地面点：左175 mm、后340 mm、离地434.7 mm。
+LIDAR_FROM_CORNER = np.array([-0.175, -0.340, 0.4347], dtype=float)
 
 # 静止时大约 1 cm 的抖动不重新计票。超过 2 cm 或 1 度才当成车被推过。
 JITTER_M = 0.02
@@ -35,6 +38,14 @@ class CarPose:
     y: float
     yaw: float
     stamp: float = 0.0
+
+
+def lidar_pose_to_corner(pose: CarPose) -> CarPose:
+    """输入已对齐场地轴向、yaw已为车头朝向的雷达位置，转为右前角。"""
+    c, s = float(np.cos(pose.yaw)), float(np.sin(pose.yaw))
+    dx, dy = LIDAR_FROM_CORNER[:2]
+    return CarPose(pose.x - (c * dx - s * dy),
+                   pose.y - (s * dx + c * dy), pose.yaw, pose.stamp)
 
 
 @dataclass(frozen=True)

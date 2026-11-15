@@ -11,8 +11,8 @@ def test_route_start_position_change_and_coordinate_noise():
 def test_mode_buttons_hit_bounds():
     from map_test import mode_at
     assert mode_at(12, 40) == 'static'
-    assert mode_at(200, 40) == 'ssh'
-    assert mode_at(380, 40) == 'local'
+    assert mode_at(200, 40) == 'laptop'
+    assert mode_at(380, 40) == 'host'
     assert mode_at(12, 80) is None
     assert mode_at(550, 40) is None
 
@@ -87,7 +87,7 @@ def test_camera_entry_preserves_corner_in_all_modes(monkeypatch):
         for heading in (0, 63, 90, 180, -135):
             yaw = math.radians(heading)
             map_test._open_camera(1.2, .4, yaw, 0, SimpleNamespace(pose_source=mode))
-            assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, 0.0 if mode in ('ssh', 'local') else yaw)
+            assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, yaw)
 
 
 def test_station_panel_lists_all_scan_headings_without_claiming_completion():
