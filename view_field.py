@@ -156,6 +156,8 @@ def live_panels(watch, pose, source, extras=()):
         right.append(f"{TOWER_NO[name]}号  {words.get(value, '未知')}  {status}")
     survey = watch.autonomy
     action = None if survey is None else survey.action
+    if survey is not None and getattr(survey, 'awaiting_start', False):
+        left.append('按 B 确认当前 x/y/yaw 和实测俯仰为起点')
     if survey is not None and getattr(survey, 'stop_until', None) is not None:
         left.append(survey.stop_message)
         action = None
@@ -440,6 +442,12 @@ def matched_camera_frame(history, stream, after_stamp):
     return None if matched is None else (frame, matched)
 
 
+def prepare_start_confirmation(watch, source):
+    """两种设备模式共用按键确认流程；手动/旧雷达模式保持原行为。"""
+    if source in ('laptop', 'host') and hasattr(watch.autonomy, 'wait_for_start'):
+        watch.autonomy.wait_for_start()
+
+
 def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     import cv2
 
@@ -471,6 +479,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         watch.autonomy = previous_session
         previous_session.watch = watch
         previous_session.pause()
+    prepare_start_confirmation(watch, source)
     report_saved_at = 0.0
     confirm_ui = dict(target=None, clicked=None, height=0, width=0)
 
@@ -568,6 +577,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             watch.follow_pitch(measured)
             if rolled is not None:
                 watch.roll = rolled
+            args.live_pitch = watch.pitch
             live_map = getattr(args, "live_map", None)
             if live_map is not None:
                 live_map(current)
@@ -590,7 +600,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 args.autonomous_map_lines = [watch.autonomy.message,
                     "已确认塔：" + ('、'.join(confirmed) or '无'),
                     "待测塔：" + ('、'.join(pending_towers) or '无；测量完成'),
-                    "只前往能看到未观测塔的补充点；每点一组朝向和俯仰"]
+                    "初始最多3点（含起点），中距离＞远＞近；仍未识别才追加中距离点"]
                 if time.monotonic() - report_saved_at >= 1.0:
                     try:
                         watch.autonomy.save(args.survey_report)
@@ -636,6 +646,14 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines
+            if (key in (ord('b'), ord('B')) and watch.autonomy is not None
+                    and getattr(watch.autonomy, 'awaiting_start', False)):
+                # current与measured来自同一组已配对的相机/雷达数据。
+                if watch.autonomy.confirm_start(current, measured):
+                    args.autonomous_route = watch.autonomy.route_display()
+                    args.autonomous_map_lines = [watch.autonomy.message]
+                    watch.autonomy.save(args.survey_report)
+                continue
             target = confirm_ui['clicked'] or (confirm_ui['target'] if key == ord('c') else None)
             confirm_ui['clicked'] = None
             if target is not None and watch.autonomy is not None:

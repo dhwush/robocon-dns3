@@ -85,3 +85,27 @@ def test_supplementary_stop_order_avoids_far_then_near_backtracking():
     assert ordered.observed == original.observed
     assert ordered.unobserved == original.unobserved
     assert sum(math.dist(a,b) for a,b in zip(line,line[1:])) == 4.
+
+
+def test_rear_boundary_blocks_parking_and_routes_without_outer_detour():
+    from field_map import DRIVING_MIN_Y
+    from motion import _ground_blocked
+    assert DRIVING_MIN_Y == -.6
+    assert _parking_clear(-4.,0.)
+    assert not _parking_clear(-4.,-.6)
+    assert not _parking_clear(4.,-.7)
+    assert not _path_clear(-4.,0.,-4.,-.7)
+    assert _travel(-20.,0.,-20.,-.7,_bypass_points()) is None
+    assert _travel(20.,0.,20.,-.7,_bypass_points()) is None
+    assert not _ground_blocked(-4.,-.8)  # 后方边界只限行，不遮挡视线。
+
+
+def test_rear_boundary_includes_body_clearance_at_every_heading():
+    from car_pose import BODY_HALF_M
+    from field_map import DRIVING_MIN_Y
+    from motion import BODY_CLEARANCE_M
+    for yaw in (0.,.8,math.pi/2,math.pi):
+        for margin,expected in ((-.01,False),(.01,True)):
+            center_y = DRIVING_MIN_Y+BODY_CLEARANCE_M+margin
+            pose = turned_pose(CarPose(-4.,center_y+BODY_HALF_M,0.),yaw)
+            assert _parking_clear(pose.x,pose.y,pose.yaw) is expected

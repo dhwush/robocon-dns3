@@ -67,3 +67,36 @@ def test_one_middle_distance_target_beats_two_unreliable_targets(monkeypatch):
     fallback = motion.nearest_observation(CarPose(0,0,0),OFFSET,None,names)
     assert math.isclose(fallback.final_x,.2)
     assert fallback.observation_fallback
+
+
+def test_far_view_beats_near_even_with_higher_penalty_and_extras_require_medium(monkeypatch):
+    name = DISPLAY[0]
+    monkeypatch.setattr(motion,'_distances',lambda *args:[])
+    monkeypatch.setattr(motion,'_parking_clear',lambda x,y,*args: abs(y)<1e-8 and .09<x<.21)
+    monkeypatch.setattr(motion,'_ground_blocked',lambda *args:False)
+    monkeypatch.setattr(motion,'_bypass_points',lambda *args:[])
+    monkeypatch.setattr(motion,'_travel',lambda x,y,a,b,*args:(math.hypot(a-x,b-y),[(x,y),(a,b)]))
+    monkeypatch.setattr(motion,'observation_poses',lambda c,p,*args: iter([(0,p,0.)]))
+    monkeypatch.setattr(motion,'_observation_preferences',
+                        lambda p,*args:{n:(False,10. if p.x>.15 else .01,4. if p.x>.15 else .8,0.) for n in DISPLAY})
+    far = motion.nearest_observation(CarPose(0,0,0),OFFSET,None,[name])
+    assert math.isclose(far.final_x,.2)
+    assert far.observation_fallback
+    extra = motion.nearest_observation(CarPose(0,0,0),OFFSET,None,[name],medium_only=True)
+    assert extra.kind == 'blocked'
+
+
+def test_initial_plan_caps_three_stops_and_defers_uncovered_targets(monkeypatch):
+    calls = []
+    monkeypatch.setattr(motion,'_observable_at',lambda *args:False)
+    monkeypatch.setattr(motion,'_bypass_points',lambda *args:[])
+    monkeypatch.setattr(motion,'_travel',lambda x,y,a,b,*args:(math.hypot(a-x,b-y),[(x,y),(a,b)]))
+    def planner(pose,offset,intr,need,*args):
+        calls.append(tuple(need))
+        return motion.Action('wait','',cells=(need[0],),observation_x=pose.x+.5,
+                             observation_y=pose.y,observation_yaw=0.,observation_pitch=0.)
+    stops,_ = motion.survey(CarPose(0,0,0),OFFSET,None,planner=planner)
+    assert len(stops) == 3
+    assert len(calls) == 2
+    assert len(stops.unobserved) == len(DISPLAY)-2
+    assert not stops[0].looks

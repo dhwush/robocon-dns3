@@ -11,7 +11,7 @@ from car_pose import (CarPose, camera_position, observation_moved, turned_pose, 
 from field_map import DISPLAY, TOWER_NO, tower_cells
 from motion import (Action, MAX_TRIES, GOAL_BEARING, PITCH_OFFSET, heading_words, format_pitch, _aim_cell, _looks,
                     fits_when_aimed, fits_rgb_when_aimed, nearest_observation, _sees,
-                    YAW_TOL_DEG, PITCH_TOL_DEG, MOVE_ARRIVE_M, _travel, _bypass_points, _move_toward, survey as supplementary_route, _observation_preferences)
+                    YAW_TOL_DEG, PITCH_TOL_DEG, MOVE_ARRIVE_M, _travel, _bypass_points, _move_toward, survey as supplementary_route, _observation_preferences, _parking_clear)
 
 WINDOW_SECONDS = 2.0
 CONFIRM_WINDOWS = 3
@@ -72,6 +72,9 @@ class AutonomousSurvey:
         self.watch = watch
         self.stationary_scan = stationary_scan
         self.initial_pose = watch.last_pose
+        self.initial_pitch = watch.pitch
+        self.awaiting_start = False
+        self.confirmed_start = False
         self.clock = clock
         self.started = clock()
         self.evidence = {name: Evidence() for name in DISPLAY}
@@ -97,6 +100,8 @@ class AutonomousSurvey:
         self.primary_stops = None
         self.primary_line = []
         self.primary_index = 1
+        self.initial_inflight = False
+        self.additional_stops = []
         self.reserve_stops = []
         self.reserve_index = 0
         self.manual_confirmed = set()
@@ -107,6 +112,38 @@ class AutonomousSurvey:
         self.distance_pose = watch.last_pose
         self.stop_until = None
         self.stop_message = ""
+
+    def wait_for_start(self):
+        """模式2/3先浏览实时姿态，按B才建立本轮起点。"""
+        self.__init__(self.watch, self.clock, stationary_scan=self.stationary_scan)
+        self.awaiting_start = True
+        self.initial_pose = None
+        self.action = self.observation_goal = None
+        self.message = '移动、旋转至起始姿态；按 B 确认当前 x/y/yaw 和实测俯仰开始'
+
+    def confirm_start(self, pose, pitch):
+        if not self.awaiting_start:
+            return False
+        if (pose is None or pitch is None or
+                not all(math.isfinite(v) for v in (pose.x,pose.y,pose.yaw,pitch))):
+            self.message = '等待有效雷达位姿和相机实测俯仰，暂不能确认起点；就绪后按 B'
+            return False
+        if not _parking_clear(pose.x,pose.y,pose.yaw):
+            self.message = '当前位置不满足整车行驶边界，请移至可达安全区域后按 B'
+            return False
+        from vote import Vote
+        watch = self.watch
+        watch.last_pose, watch.pitch = pose, float(pitch)
+        watch.votes = {name: Vote() for name in DISPLAY}
+        watch.stable_frames = 0
+        for attr in ('local_rgb_tracks', 'parallax_origins'):
+            if hasattr(watch, attr):
+                getattr(watch, attr).clear()
+        self.__init__(watch, self.clock, stationary_scan=self.stationary_scan)
+        self.confirmed_start = True
+        self.message = (f'起点已确认：x={pose.x:+.3f} m y={pose.y:+.3f} m '
+                        f'yaw={math.degrees(pose.yaw):+.1f}° 俯仰={pitch:+.1f}°；停稳后开始观测规划')
+        return True
 
     def confirmation_target(self):
         action = self.action
@@ -145,9 +182,10 @@ class AutonomousSurvey:
 
     @property
     def complete(self):
-        return all(v.locked is not None for v in self.watch.votes.values())
+        return not self.awaiting_start and all(v.locked is not None for v in self.watch.votes.values())
 
     def pause(self):
+        self.initial_inflight = False
         self.sampling_suspended_at = None
         self.pitch_checks = {name: [] for name in DISPLAY}
         for evidence in self.evidence.values():
@@ -332,6 +370,8 @@ class AutonomousSurvey:
         return False
 
     def update(self):
+        if self.awaiting_start:
+            return
         watch = self.watch
         now = self.clock()
         pose = watch.last_pose
@@ -456,6 +496,8 @@ class AutonomousSurvey:
         return True
 
     def _schedule(self, now):
+        if self.awaiting_start:
+            return
         watch = self.watch
         pose, offset, intr = watch.last_pose, watch.setup.center_to_corner, watch.intr
         if self.initial_pose is None:
@@ -473,7 +515,8 @@ class AutonomousSurvey:
                 return
             self.action = None
         # 不生成必经复看主线，任务集只包含尚无识别结果的塔。
-        self.primary_stops, self.primary_line = [], []
+        if self.stationary_scan:
+            self.primary_stops, self.primary_line = [], []
         self.reserve_stops = []
         pending = [n for n in DISPLAY if watch.votes[n].locked is None]
         if not pending:
@@ -497,12 +540,36 @@ class AutonomousSurvey:
             excluded = [body_center(self.initial_pose)]
             excluded += [body_center(CarPose(o['x'],o['y'],math.radians(o['yaw_deg'])))
                          for o in self.observations]
-            plan, _ = supplementary_route(pose, offset, intr, watch.pitch, pending=pending,
-                         references=references, failed=self.failed_observations,
-                         excluded_centers=excluded, planner=nearest_observation)
-            goal = Action('blocked','暂无安全补充点')
-            if len(plan) > 1:
-                stop = plan[1]
+            if self.initial_inflight:
+                # 上一初始点已完成、超时或不可达，才消费这一站。
+                self.primary_index += 1
+                self.initial_inflight = False
+            if self.primary_stops is None:
+                self.primary_stops, self.primary_line = supplementary_route(
+                    self.initial_pose if self.confirmed_start else pose, offset, intr,
+                    self.initial_pitch if self.confirmed_start else watch.pitch, pending=pending,
+                    references=references, failed=self.failed_observations,
+                    excluded_centers=excluded, planner=nearest_observation, max_stops=3)
+            stop = None
+            while self.primary_index < len(self.primary_stops):
+                candidate = self.primary_stops[self.primary_index]
+                if any(TOWER_NO[n] in {look.number for look in candidate.looks} for n in pending):
+                    stop = candidate
+                    self.initial_inflight = True
+                    break
+                self.primary_index += 1
+            if stop is None:
+                # 初始路线走完仍未识别，才追加一站；追加站严格使用中距离分离视角。
+                plan, _ = supplementary_route(
+                    pose, offset, intr, watch.pitch, pending=pending,
+                    references=references, failed=self.failed_observations,
+                    excluded_centers=excluded, planner=nearest_observation,
+                    max_stops=2, medium_only=True)
+                if len(plan) > 1:
+                    stop = plan[1]
+                    self.additional_stops.append(stop)
+            goal = Action('blocked','暂无安全中距离补充点')
+            if stop is not None:
                 look = stop.looks[0]
                 numbers = {item.number for item in stop.looks}
                 names = tuple(n for n in pending if TOWER_NO[n] in numbers)
@@ -516,7 +583,7 @@ class AutonomousSurvey:
             else:
                 self.action = goal
                 self.blocked_until = now+5.
-                self.message = '暂无能看到剩余塔的安全补充点，保留未观测目标'
+                self.message = '暂无能看到剩余塔的安全中距离补充点，保留未观测目标'
             return
         cells = {cell.name: cell for cell in tower_cells()}
         eligible = {n: (fits_when_aimed(cells[n], pose, offset, intr)
@@ -662,27 +729,40 @@ class AutonomousSurvey:
         return rows
 
     def route_display(self):
+        if self.awaiting_start:
+            return dict(points=[],line=[],active=None,index=0,complete=False,kinds=[],
+                        reserve_points=[],reserve_index=0)
         initial = self.initial_pose or self.watch.last_pose
         points = [(initial.x,initial.y)] if initial is not None else []
         kinds = ['初始点']
-        goal = self.observation_goal
-        if goal is not None:
+        if self.primary_stops:
+            points = [(s.x,s.y) for s in self.primary_stops]
+            kinds = ['初始点'] + ['补充点']*(len(points)-1)
+            points.extend((s.x,s.y) for s in self.additional_stops)
+            kinds.extend('追加点' for _ in self.additional_stops)
+        elif self.observation_goal is not None:
+            goal = self.observation_goal
             points.append((goal.observation_x,goal.observation_y))
             kinds.append('补充点')
         active = None
         if self.action is not None and self.action.kind == 'move':
             a = self.action
             active = [(self.watch.last_pose.x,self.watch.last_pose.y),(a.x,a.y)]
-        return dict(points=points, line=[], active=active,
-                    index=len(points), complete=self.complete, kinds=kinds,
+        return dict(points=points, line=self.primary_line, active=active,
+                    index=min(self.primary_index+1,len(points)) if self.initial_inflight else len(points), complete=self.complete, kinds=kinds,
                     reserve_points=[], reserve_index=0)
 
     def snapshot(self):
         return dict(coordinates="场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
+                    awaiting_start=self.awaiting_start,
+                    initial_pose=asdict(self.initial_pose) if self.initial_pose is not None else None,
+                    initial_pitch=self.initial_pitch if self.confirmed_start else None,
                     next_action=asdict(self.action) if self.action is not None else None,
                     pending=[n for n,v in self.watch.votes.items() if v.locked is None],
                     complete=self.complete, results={n: v.locked for n,v in self.watch.votes.items()},
                     route_plan=dict(primary=[asdict(s) for s in self.primary_stops or []],
+                                    primary_index=self.primary_index,
+                                    additional=[asdict(s) for s in self.additional_stops],
                                     reserve=[asdict(s) for s in self.reserve_stops],
                                     reserve_index=self.reserve_index),
                     observation_goal=asdict(self.observation_goal) if self.observation_goal else None,

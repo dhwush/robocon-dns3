@@ -97,3 +97,53 @@ def test_history_does_not_revive_stale_pose(monkeypatch):
     stream.accept(CarPose(2, 3, .4, 99.55))
     monkeypatch.setattr('radar_pose.time.time', lambda: 101.)
     assert matched_camera_frame([(None,None,None,99.55,1.)], stream, 0.) is None
+
+
+@pytest.mark.parametrize('source', ['laptop','host'])
+def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tmp_path, source):
+    import cv2
+    import view_field as vf
+    from car_pose import CarPose, Setup, load_intrinsics
+    from report import FieldWatch
+    from field_map import DISPLAY
+    from classify import CellView
+
+    monkeypatch.setattr(vf,'ROOT',tmp_path)
+    monkeypatch.setitem(sys.modules,'pyrealsense2',SimpleNamespace())
+    intr = load_intrinsics('config/intrinsics.yaml')
+    color = np.zeros((8,8,3),np.uint8)
+    frames = dict(color=color,depth=np.ones((8,8)),gravity=np.zeros(3),stamp=1.,received=1.,
+                  intrinsics=intr,camera=dict(serial_number='test',distortion_model='none',distortion_coefficients=[]))
+    pipeline = SimpleNamespace(stop=lambda:None)
+    ready = SimpleNamespace(wait=lambda timeout:True,clear=lambda:None)
+    monkeypatch.setattr(vf,'_open_camera',lambda rs:(pipeline,None,ready,threading.Lock(),frames))
+    monkeypatch.setattr(vf,'_apply_light',lambda *a:None)
+    monkeypatch.setattr(vf,'paint_window',lambda image,*a,**k:image)
+    monkeypatch.setattr(vf,'pitch_from_gravity',lambda gravity:-17.)
+    monkeypatch.setattr(vf,'roll_from_gravity',lambda gravity:0.)
+    for method in ('imshow','namedWindow','setMouseCallback','destroyAllWindows'):
+        monkeypatch.setattr(cv2,method,lambda *a,**k:None)
+    views = {n:CellView(None,False,True,False,False,0.,0.,0.,255.) for n in DISPLAY}
+    monkeypatch.setattr('report.inspect_frame',lambda *a,**k:views)
+    watch = FieldWatch(Setup(True,np.zeros(2),33.,'', 'rad',False),intr)
+    initial = CarPose(-4.,.6,-.4)
+    pressed = CarPose(-3.8,.8,1.2)
+    poses = iter([initial,pressed,pressed])
+    stream = SimpleNamespace(match=lambda stamp=None:next(poses),error='',close=lambda:None)
+    keys = iter([-1,ord('b'),ord('q')])
+    def key(delay):
+        result = next(keys)
+        if result == ord('b'):
+            assert watch.autonomy.awaiting_start
+            assert watch.autonomy.primary_stops is None
+            assert watch.autonomy.initial_pose is None
+        return result
+    monkeypatch.setattr(cv2,'waitKey',key)
+    args = SimpleNamespace(mode='extend',pose_source=source,offline=False,radar_stream=stream)
+    vf._live(args,watch,CarPose(0,0,0))
+    assert watch.autonomy.confirmed_start
+    assert not watch.autonomy.awaiting_start
+    assert watch.autonomy.initial_pose == pressed
+    assert watch.autonomy.initial_pitch == -17.
+    assert watch.autonomy.initial_pitch != 33.  # 配置值不能冒充实测起始俯仰。
+    assert watch.autonomy.observations == []

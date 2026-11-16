@@ -21,7 +21,7 @@ import numpy as np
 
 from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, load_intrinsics, load_setup
 from field_map import (TOWER_NO, all_cells, tower_cells, ORIGIN_X, CELL_M,
-                       LEFT_CORRIDOR_MAX_Y, RIGHT_CORRIDOR_MAX_Y)
+                       LEFT_CORRIDOR_MAX_Y, RIGHT_CORRIDOR_MAX_Y, DRIVING_MIN_Y)
 from motion import heading_words, format_pitch, survey
 from report import FieldWatch
 from view_field import ROOT, _live, can_pose_text
@@ -130,7 +130,8 @@ def select_route_stop(view: dict, stops: list, index: int, current_yaw: float) -
 def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | None = None) -> list[str]:
     stop = stops[index]
     lines = [f"{stop.kind}（{index + 1}/{len(stops)}）：车停在这里，按一组固定姿态观察",
-             f"右前角点位：x={stop.x:+.3f} m y={stop.y:+.3f} m"]
+             f"右前角点位：x={stop.x:+.3f} m y={stop.y:+.3f} m",
+             "初始最多3点（含起点）；中距离＞远＞近；实测仍未识别才追加中距离点"]
     if not stop.looks:
         return lines + ["当前姿态没有可观测塔；只前往后续补充点"]
     lines.append("本站只观察：" + '、'.join(look.number+'号' for look in stop.looks))
@@ -150,7 +151,7 @@ def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | No
         lines.append("中距离分离视角不足：本点为兜底观察视角")
     missing = getattr(stops,'unobserved',())
     if missing:
-        lines.append("暂无安全补充点的塔：" + '、'.join(TOWER_NO[n]+'号' for n in missing))
+        lines.append("初始路线未覆盖，实测后仍未识别才追加中距离点：" + '、'.join(TOWER_NO[n]+'号' for n in missing))
     return lines
 
 
@@ -397,6 +398,11 @@ def _draw_map(
         u1,v1 = _pixel(x1,limit)
         draw.line((u0,v0,u1,v1),fill=color,width=4)
         draw.text((u0+10,v0-24),f"走廊上限 Y={limit:.3f} m",font=font,fill=color)
+
+    u0,v0 = _pixel(X_MIN,DRIVING_MIN_Y)
+    u1,v1 = _pixel(X_MAX,DRIVING_MIN_Y)
+    draw.line((u0,v0,u1,v1),fill=(245,110,70),width=4)
+    draw.text((u0+10,v0-24),"后方边界 Y=-0.600 m（原点后60厘米）",font=font,fill=(245,110,70))
 
     for cell in all_cells():
         u, v = _pixel(cell.x, cell.y)
@@ -660,7 +666,7 @@ def main() -> None:
             heading = current_radar.yaw if current_radar is not None else (0.0 if yaw is None else yaw)
             key = route_position_key(marker)
             # 航向是执行观察动作时的实际朝向，不能使已经规划的路线重新生成。
-            if not view["pinned"] and key != route_key and (radar_stream is None or (current_radar is not None and route_key is None)):
+            if not view["pinned"] and key != route_key and radar_stream is None:
                 route_key = key
                 view["look"] = 0
                 view["arrived"] = 0 if key is not None else None
@@ -686,6 +692,8 @@ def main() -> None:
                 lines = stop_lines(route_stops, arrived, int(view["look"]) if view["pinned"] else 0, heading if radar_stream is not None else (view.get("arrival_yaw") if view["pinned"] else heading))
             if radar_stream is not None:
                 lines.insert(0, radar_pose_text(current_radar))
+                if args.pose_source in ("laptop", "host"):
+                    lines.insert(1, "任意可达位置/朝向均可起步：回车打开相机，再按 B 确认实际位姿和俯仰开始规划")
                 if current_radar is None:
                     lines.insert(1, "雷达连接原因：" + str(radar_stream.error))
             elif where is not None:
@@ -757,13 +765,16 @@ def main() -> None:
                 cv2.destroyWindow(window)
                 selected_pitch = pitch
                 target_lines = []
-                if isinstance(arrived, int) and 0 <= arrived < len(route_stops):
+                if radar_stream is None and isinstance(arrived, int) and 0 <= arrived < len(route_stops):
                     looks = route_stops[arrived].looks
                     if looks:
                         selected_pitch = looks[int(view["look"]) % len(looks)].pitch_deg
                     target_lines = stop_lines(route_stops, arrived, int(view["look"]), view.get("arrival_yaw"))
                 # 固定计划与测试位姿分别传递，实时定位只移动地图标记。
                 args.fixed_target_lines = target_lines
+                if args.pose_source in ("laptop", "host"):
+                    args.autonomous_route = {}
+                    args.autonomous_map_lines = ["按 B 确认当前 x/y/yaw 和实测俯仰开始规划"]
                 live_heading = {"yaw": opening}
                 def select_live_target(event, u, v, _flags, _param):
                     if event != cv2.EVENT_LBUTTONDOWN or (radar_stream is not None and radar_stream.match() is None):
@@ -782,7 +793,7 @@ def main() -> None:
                     else:
                         status = [f"手动右前角 x={current.x:+.3f} y={current.y:+.3f} yaw={np.degrees(current.yaw):+.1f}°"]
                     cv2.imshow("route", _draw_map(None if current is None else (current.x, current.y),
-                        None if current is None else current.yaw, selected_pitch,
+                        None if current is None else current.yaw, getattr(args,"live_pitch",selected_pitch),
                         route_line=route_line, route_stops=route_points,
                         arrived=view["arrived"], arrived_lines=status + getattr(args, "autonomous_map_lines", args.fixed_target_lines),
                         route_state=getattr(args,"autonomous_route",None) if current is not None else None,

@@ -17,10 +17,13 @@ def stabilize_local_rgb(views, tracks, camera=None):
     import cv2
     import numpy as np
     for name,view in views.items():
-        view.measurements.pop('display_piece',None)
+        if view.measurements is not None:
+            view.measurements.pop('display_piece',None)
         if view.method!='RGB局部盒面' or view.conclusion not in ('1','2') or view.piece is None:
             tracks.pop(name,None)
             continue
+        if view.measurements is None:
+            view.measurements={}
         x,y,w,h=cv2.boundingRect(view.piece)
         center=(x+w/2,y+h/2)
         previous=tracks.get(name)

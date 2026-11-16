@@ -1,0 +1,195 @@
+[
+  {
+    "time": 30,
+    "pose": [
+      -0.009,
+      0.002,
+      0.4,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": true
+  },
+  {
+    "time": 32,
+    "pose": [
+      -0.005,
+      0.03,
+      0.4,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": true
+  },
+  {
+    "time": 34,
+    "pose": [
+      -0.008,
+      0.031,
+      0.4,
+      -1
+    ],
+    "state": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "box": [
+      323,
+      303,
+      107,
+      32
+    ],
+    "seam_rejected": false
+  },
+  {
+    "time": 35,
+    "pose": [
+      -0.007,
+      0.039,
+      0.4,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": true
+  },
+  {
+    "time": 36,
+    "pose": [
+      -0.007,
+      0.039,
+      0.4,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": true
+  },
+  {
+    "time": 38,
+    "pose": [
+      0,
+      0.042,
+      0.4,
+      -1
+    ],
+    "state": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "box": [
+      323,
+      304,
+      107,
+      31
+    ],
+    "seam_rejected": false
+  },
+  {
+    "time": 40,
+    "pose": [
+      -0.008,
+      0.037,
+      0.4,
+      1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": true
+  },
+  {
+    "time": 42,
+    "pose": [
+      -0.063,
+      0.068,
+      22.5,
+      -1
+    ],
+    "state": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "box": [
+      698,
+      303,
+      72,
+      32
+    ],
+    "seam_rejected": false
+  },
+  {
+    "time": 44,
+    "pose": [
+      -0.069,
+      0.07,
+      28.4,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "box": null,
+    "seam_rejected": false
+  },
+  {
+    "time": 45,
+    "pose": [
+      -0.075,
+      0.069,
+      28.8,
+      0
+    ],
+    "state": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "box": [
+      800,
+      304,
+      103,
+      29
+    ],
+    "seam_rejected": false
+  },
+  {
+    "time": 46,
+    "pose": [
+      -0.088,
+      0.059,
+      34,
+      -1
+    ],
+    "state": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "box": [
+      900,
+      300,
+      111,
+      32
+    ],
+    "seam_rejected": false
+  },
+  {
+    "time": 155,
+    "pose": [
+      -1.857,
+      0.353,
+      -8.2,
+      -1
+    ],
+    "state": null,
+    "method": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；彩色层高不符：可见高6.6厘米；一层允许9.0至27.0，两层允许27.0至81.0厘米",
+    "box": null,
+    "seam_rejected": false
+  }
+]

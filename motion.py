@@ -777,8 +777,9 @@ def primary_route(pose, offset, intr):
 
 
 def survey(pose: CarPose, offset: np.ndarray, intr: Intrinsics, pitch=0.0, *,
-           pending=None, references=None, failed=(), excluded_centers=(), planner=None) -> tuple[list[RouteStop], list[tuple[float, float]]]:
-    """初始实际姿态可见即视为已观测；只为剩余塔生成新的补充点。"""
+           pending=None, references=None, failed=(), excluded_centers=(), planner=None,
+           max_stops=3, medium_only=False) -> tuple[list[RouteStop], list[tuple[float, float]]]:
+    """初始路线默认最多3站（含起点）；未覆盖塔留待实测后追加中距离站。"""
     cells = _cells()
     planner = nearest_observation if planner is None else planner
     preferences = _observation_preferences(pose, offset, pitch, intr)
@@ -789,9 +790,10 @@ def survey(pose: CarPose, offset: np.ndarray, intr: Intrinsics, pitch=0.0, *,
     line = [(pose.x, pose.y)]
     cursor, current_pitch = pose, pitch
     visited = [body_center(pose), *excluded_centers]
-    for _ in range(len(remaining)):
-        goal = planner(cursor, offset, intr, remaining, None, references,
-                       current_pitch, failed, True, visited)
+    for _ in range(min(len(remaining), max(0, max_stops-1))):
+        args = (cursor, offset, intr, remaining, None, references,
+                current_pitch, failed, True, visited)
+        goal = planner(*args, True) if medium_only else planner(*args)
         if goal.observation_yaw is None:
             break
         target = CarPose(goal.observation_x, goal.observation_y, goal.observation_yaw)
@@ -1155,8 +1157,8 @@ def observation_quality(cell, pose, offset, intr):
 
 
 def nearest_observation(pose, offset, intr, need, exhausted=None, references=None, pitch=0.0, failed=(),
-                        require_move=False, excluded_centers=()):
-    """联合选择位置、yaw、俯仰，以同一实际姿态可观察的未识别塔数为先。"""
+                        require_move=False, excluded_centers=(), medium_only=False):
+    """联合选择位置、yaw、俯仰；先按中距离＞远＞近，再比较未识别塔覆盖。"""
     exhausted, references = exhausted or {}, references or {}
     cells = _cells()
     candidates = {(pose.x, pose.y)}
@@ -1251,15 +1253,18 @@ def nearest_observation(pose, offset, intr, need, exhausted=None, references=Non
                 continue
             preferences = _observation_preferences(faced,offset,target_pitch,intr)
             preferred = [n for n in covered if preferences[n][0]]
-            useful_here = preferred or covered
+            if medium_only and not preferred:
+                continue
+            distant = [n for n in covered if preferences[n][2] >= PREFERRED_CLEARANCE_MIN_M-1e-6]
+            useful_here = preferred or distant or covered
             fallback = not bool(preferred)
             quality = sum(observation_quality(cells[n], faced, offset, intr) for n in useful_here)
             angle = abs(_wrap(math.degrees(faced.yaw-pose.yaw))) + abs(target_pitch-pitch)
             if preferred:
                 rank = (0, -len(preferred), -round(quality,1), trip[0], angle, 0.)
             else:
-                penalty = sum(preferences[n][1] for n in covered)/len(covered)
-                rank = (1, round(penalty,3), -len(covered), -round(quality,1), trip[0], angle)
+                penalty = sum(preferences[n][1] for n in useful_here)/len(useful_here)
+                rank = (1 if distant else 2, round(penalty,3), -len(useful_here), -round(quality,1), trip[0], angle)
             if best is None or rank < best[0]:
                 best = (rank, x, y, trip[1], tuple(useful_here), faced, target_pitch, fallback)
     if best is None:

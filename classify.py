@@ -2219,6 +2219,31 @@ def _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll=0.):
     return True
 
 
+def _merge_white_top_lines(lines,z_cam,intr,roll=0.):
+    """合并短缺口两侧共线的顶边；原始线段保留，合并结果仍须核验盒面。"""
+    original=np.asarray(lines,dtype=np.int32).reshape(-1,4)
+    segments=[]
+    for x0,y0,x1,y1 in original:
+        if x1<x0:
+            x0,y0,x1,y1=x1,y1,x0,y0
+        if x1-x0<8:
+            continue
+        slope=(y1-y0)/(x1-x0)
+        if abs(slope-np.tan(np.deg2rad(roll)))<=.25:
+            segments.append((int(x0),int(y0),int(x1),int(y1),float(slope)))
+    segments.sort(key=lambda q:(q[0],q[1]))
+    gap=max(4,int(.05*intr.fx/z_cam))
+    merged=[]
+    for x0,y0,x1,y1,slope in segments:
+        for a,b,c,d,other_slope in segments:
+            if a<=x0 or a> x1+gap or c<=x1 or abs(other_slope-slope)>.06:
+                continue
+            if abs(b-(y0+(a-x0)*slope))>3 or _metric(c-x0,z_cam,intr.fx)>.65:
+                continue
+            merged.append((x0,y0,c,d))
+    return np.unique(np.asarray([*original,*merged],np.int32).reshape(-1,4),axis=0)
+
+
 def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,diagnostic=None,depth=None):
     """从真实顶边和局部盒面生成候选，不要求可见盒底或独立白色连通块。"""
     info={'checks':[]}
@@ -2242,6 +2267,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                            minLineLength=full_length,maxLineGap=max(4,int(.05*intr.fx/z_cam)))
     if bridged is not None:
         lines=bridged if lines is None else np.concatenate((lines.reshape(-1,4),bridged.reshape(-1,4)))
+    hough_lines=set() if lines is None else {tuple(map(int,q)) for q in lines.reshape(-1,4)}
     # Hough会随搜索掩膜内其它边缘的增减而漏掉同一条顶边。小roll时
     # 再逐行收集已有边缘的连续横段；不创造边缘，后续仍核验盒面和侧边。
     if abs(roll)<3:
@@ -2249,7 +2275,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
         joined=cv2.morphologyEx(joined,cv2.MORPH_CLOSE,np.ones((1,9),np.uint8))
         transitions=np.diff(np.pad(joined>0,((0,0),(1,1))).astype(np.int8),axis=1)
         yy,starts=np.nonzero(transitions==1)
-        end_y,ends=np.nonzero(transitions==-1)
+        _,ends=np.nonzero(transitions==-1)
         spans=[]
         for row,left,right in zip(yy,starts,ends):
             if row%2==0 and right-left>=full_length:
@@ -2259,15 +2285,18 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
             lines=extra if lines is None else np.concatenate((lines.reshape(-1,4),extra))
     if lines is None:
         return None
+    lines=_merge_white_top_lines(lines,z_cam,intr,roll)
     candidates=[]
     pending=[]
     band=max(8,int(.12*intr.fy/z_cam))
     # 绝对顶高由格心距离反投影，前侧盒面及小角度姿态误差会随距离
-    # 放大。留出1.2度角误差及4cm近面误差，上限14cm仍小于半个层高；
+    # 放大。两层留出1.2度角误差及4cm近面误差，上限14cm小于半层高；
+    # 一层仍用7.5cm，避免低背景白块趁放宽后成为一层候选。
     # 顶边、侧边、连续盒面及深度归属的核验继续独立执行。
     height_tolerance=max(.075,min(.14,.04+z_cam*np.tan(np.deg2rad(1.2))))
     info['height_tolerance_cm']=height_tolerance*100
     for x0,y0,x1,y1 in lines.reshape(-1,4):
+        from_hough=tuple(map(int,(x0,y0,x1,y1))) in hough_lines
         if x1<x0:
             x0,y0,x1,y1=x1,y1,x0,y0
         w=int(x1-x0)
@@ -2279,7 +2308,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
         if z is None:
             continue
         state,level=min([('1',cell.one_z),('2',cell.two_z)],key=lambda item:abs(item[1]-z))
-        if abs(z-level)>height_tolerance:
+        if abs(z-level)>(height_tolerance if state=='2' else .075):
             continue
         # 盒顶在其50cm占地内的投影，而非搜索框内任意同高度线段。
         projected=[project(np.array([xx,yy,level]),pose,offset,pitch,intr,roll)
@@ -2333,12 +2362,18 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
         info['checks'].append(check)
         if all(q is None for q in side_cols):
             continue
+        if not from_hough and check['sides']<2:
+            # 逐行补线只补有双侧边的盒面，避免杂物横边与单侧边拼接。
+            continue
         if check['sides']==1 and edge_support<(.8 if _metric(w,z_cam,intr.fx)<.23 else .6):
             continue
         # 一条真实侧边加连续顶边也可定位局部盒面；未见侧不能伪称完整边。
         left=side_cols[0] if side_cols[0] is not None else int(x0)
         right=side_cols[1] if side_cols[1] is not None else int(x1)
         if right-left<w*.8 or not .12<=_metric(right-left,z_cam,intr.fx)<=.65:
+            continue
+        if not from_hough and w<.75*(right-left):
+            # 圆盘/齿轮顶部的短平段不能向两侧扩成矩形盒面。
             continue
         if all(q is not None for q in side_cols) and _metric(right-left,z_cam,intr.fx)<.12:
             continue
@@ -2366,6 +2401,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                          &(np.abs(gray[support_rows,face_cols[:,None]].astype(float)-reference)<28))
         if np.mean(support_valid)<.5 or np.mean(face_consistent[support_valid])<.8:
             continue
+        check['body_support']=float(np.mean(face_consistent[support_valid]))
         check['side_columns']=[left,right]
         check['complete_sides']=all(q is not None for q in side_cols)
         # 完整盒面的底边提供相对高度，抵消相机姿态/实际支撑面造成的
@@ -2449,6 +2485,11 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
             # 盒面中的横线已证实是接缝，不能再用它充当底边把两层缩为一层。
             relative=False
             check['seam_restored_state']='2'
+        # 先保留低横线供上下盒面仲裁；没有配对顶边时再独立排除接缝。
+        if (state=='1' and check['state']=='1' and depth is None
+                and _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll)):
+            check['seam_rejected']=True
+            continue
         level=cell.one_z if state=='1' else cell.two_z
         if depth is not None:
             yy,xx=below.ravel(),np.broadcast_to(cols[:,None],below.shape).ravel()
@@ -2478,13 +2519,20 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                 if np.count_nonzero(measured_top)<5 and np.any(body_measured):
                     check['depth_state']='body_only_without_top_or_upper'
                     continue
-        candidates.append((state,piece,z,relative))
+        # 同层候选比较真实盒面支撑，不再只挑反投影最高的一小段。
+        # 层高偏差作软评分；层数仍先由几何、相对盒高及接缝核验决定。
+        width=_metric(cv2.boundingRect(piece)[2],z_cam,intr.fx)
+        score=(check['sides']+check['edge_support']+check['body_support']
+               +min(1.,width/.35)-.25*abs(z-level)/height_tolerance)
+        check['score']=float(score)
+        candidates.append((state,piece,z,relative,float(score)))
     # 两层的真实顶边优先于下方接缝；几何验证不通过的线段不进入比较。
     info['candidates']=len(candidates)
     if not candidates:
         return None
-    chosen=max(candidates,key=lambda item:(item[3],item[2]))
+    chosen=max(candidates,key=lambda item:(item[3],item[0]=='2',item[4]))
     info['state']=chosen[0]
+    info['selected_score']=chosen[4]
     return chosen[:2]
 
 

@@ -547,10 +547,11 @@ def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range()
     cell = tower_cells()[0]
     offset = np.zeros(2)
     intr = load_intrinsics('config/intrinsics.yaml')
-    pose = CarPose(cell.x,cell.y-4.5,0.)
+    # 侧方合法走廊内验证远距离像素预算，避免落入原点后60cm禁行区。
+    pose = CarPose(cell.x-4.5,cell.y,-math.pi/2)
     assert not motion.fits_when_aimed(cell,pose,offset,intr)
     assert motion.fits_rgb_when_aimed(cell,pose,offset,intr)
-    assert not motion.fits_rgb_when_aimed(cell,CarPose(cell.x,cell.y-40.,0.),offset,intr)
+    assert not motion.fits_rgb_when_aimed(cell,CarPose(cell.x-40.,cell.y,-math.pi/2),offset,intr)
     assert motion.DEPTH_FAR_M == 3.
 
 
@@ -791,7 +792,7 @@ def test_map_preview_adds_only_points_for_previously_unseen_towers():
     stops, line = motion.survey(pose, np.zeros(2), load_intrinsics('config/intrinsics.yaml'))
     assert (stops[0].x,stops[0].y) == (pose.x,pose.y)
     observed = {look.number for look in stops[0].looks}
-    assert len(stops) > 1
+    assert 1 < len(stops) <= 3
     for stop in stops[1:]:
         assert stop.looks
         assert len({(look.yaw_deg,look.pitch_deg) for look in stop.looks}) == 1
@@ -1103,3 +1104,106 @@ def test_explicit_fallback_goal_can_use_its_own_result(monkeypatch):
     survey.update()
     assert watch.votes[name].locked == '1'
     assert survey.complete
+
+
+def test_initial_route_is_cached_and_adds_middle_distance_only_after_last_stop(monkeypatch):
+    from motion import RouteStop, RouteStops, Look
+    _, watch, clock, _ = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch, clock)
+    calls = []
+    def route(pose, offset, intr, pitch, **kwargs):
+        calls.append(kwargs)
+        names = kwargs['pending']
+        limit = kwargs['max_stops']
+        stops = RouteStops([RouteStop(pose.x,pose.y,(), '初始点')])
+        for i,n in enumerate(names[:limit-1],1):
+            stops.append(RouteStop(float(i),0.,(Look(autonomous.TOWER_NO[n],0.,0.),)))
+        return stops, [(s.x,s.y) for s in stops]
+    monkeypatch.setattr(autonomous, 'supplementary_route', route)
+    monkeypatch.setattr(survey, '_advance_observation', lambda: survey.observation_goal is not None)
+    survey._schedule(clock())
+    assert len(survey.primary_stops) == 3
+    assert len(calls) == 1
+    survey._schedule(clock())
+    assert len(calls) == 1  # 前往第一站时不重算、不追加。
+    for i in range(2):
+        for n in survey.observation_goal.cells:
+            watch.votes[n].locked = '1'
+        survey.observation_goal = None
+        survey._schedule(clock())
+        if i == 0:
+            assert len(calls) == 1  # 第二站沿用初始路线。
+    assert len(calls) == 2
+    assert calls[-1]['medium_only'] is True
+    assert calls[-1]['max_stops'] == 2
+    assert all(watch.votes[n].locked is None for n in calls[-1]['pending'])
+    assert len(survey.additional_stops) == 1
+    assert len(survey.primary_stops) == 3
+
+
+def test_completed_initial_route_does_not_append_when_all_towers_recognized(monkeypatch):
+    from motion import RouteStop, RouteStops
+    _, watch, clock, _ = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch, clock)
+    survey.primary_stops = RouteStops([RouteStop(0.,0.,())])
+    survey.primary_index = 1
+    for vote in watch.votes.values():
+        vote.locked = '1'
+    monkeypatch.setattr(autonomous, 'supplementary_route', lambda *a,**k: pytest.fail('已识别全部塔不得补点'))
+    survey._schedule(clock())
+    assert survey.action.kind == 'stop'
+    assert not survey.additional_stops
+
+
+@pytest.mark.parametrize('source', ['laptop','host'])
+@pytest.mark.parametrize('x,y,yaw,pitch', [(-4.,.8,.7,-18.), (4.,2.8,-2.1,23.), (0.,0.,1.8,7.)])
+def test_confirmed_random_start_uses_actual_pose_and_pitch_for_initial_plan(monkeypatch, source, x,y,yaw,pitch):
+    from motion import RouteStop, RouteStops, Look
+    from view_field import prepare_start_confirmation
+    _,watch,clock,_ = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    watch.autonomy = survey
+    prepare_start_confirmation(watch,source)
+    assert survey.awaiting_start
+    assert survey.initial_pose is None
+    assert not survey.route_display()['points']
+    # 确认前移动、转向、改变俯仰都不能建立路线或记住识别结果。
+    watch.last_pose = CarPose(x,y,yaw)
+    watch.pitch = pitch
+    survey.update()
+    assert survey.primary_stops is None
+    assert all(v.locked is None for v in watch.votes.values())
+    confirmed = watch.last_pose
+    assert survey.confirm_start(confirmed,pitch)
+    assert survey.initial_pose == confirmed
+    assert survey.initial_pitch == pitch
+    assert survey.distance_m == 0.
+    assert not survey.confirm_start(CarPose(0,0,0),0.)  # B不会重置已开始的路线。
+    calls = []
+    def plan(pose,offset,intr,pi,**kwargs):
+        calls.append((pose,pi,kwargs))
+        return RouteStops([RouteStop(pose.x,pose.y,()),
+                           RouteStop(pose.x+.5,pose.y,(Look(autonomous.TOWER_NO[DISPLAY[0]],0.,0.),))]), []
+    monkeypatch.setattr(autonomous,'supplementary_route',plan)
+    monkeypatch.setattr(survey,'_advance_observation',lambda: False)
+    # 后续反馈不能悄悄覆盖按键确认的初始姿态。
+    watch.last_pose = CarPose(x+.03,y+.02,yaw+.1)
+    watch.pitch = pitch+2.
+    survey._schedule(clock())
+    assert calls[0][0] == confirmed
+    assert calls[0][1] == pitch
+    assert calls[0][2]['max_stops'] == 3
+    assert survey.snapshot()['initial_pitch'] == pitch
+
+
+def test_start_confirmation_rejects_missing_pitch_pose_or_forbidden_position(monkeypatch):
+    _,watch,clock,_ = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    survey.wait_for_start()
+    for pose,pitch in ((None,0.),(CarPose(0,0,0),None),
+                       (CarPose(0,0,float('nan')),0.),(CarPose(-4.,-.7,0.),5.)):
+        assert not survey.confirm_start(pose,pitch)
+        assert survey.awaiting_start
+        assert survey.initial_pose is None
+        assert survey.primary_stops is None
+    assert survey.confirm_start(CarPose(-4.,.8,-1.),-12.)
