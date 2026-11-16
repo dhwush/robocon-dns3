@@ -1,0 +1,123 @@
+{
+  "coordinates": "场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
+  "next_action": {
+    "kind": "move",
+    "text": "同时向后平移 0.33 米，向右平移 0.56 米",
+    "pitch": null,
+    "yaw": null,
+    "x": -1.5767676206833618,
+    "y": -0.5838517870878944,
+    "cell": null,
+    "attempt": 0,
+    "final_x": -1.5767676206833618,
+    "final_y": -0.5838517870878944,
+    "chase_to": "joint",
+    "cells": [
+      "最近左侧地面",
+      "最近一行左侧"
+    ],
+    "observation_x": null,
+    "observation_y": null,
+    "observation_yaw": null,
+    "observation_pitch": null,
+    "observation_fallback": false
+  },
+  "pending": [
+    "最近左侧地面",
+    "最近一行左侧",
+    "第三行左侧",
+    "最近一行右侧",
+    "最近右侧地面",
+    "右侧地面远一格"
+  ],
+  "complete": false,
+  "results": {
+    "最近左侧地面": null,
+    "最近一行左侧": null,
+    "第三行左侧": null,
+    "最近一行右侧": null,
+    "最近右侧地面": null,
+    "右侧地面远一格": null
+  },
+  "route_plan": {
+    "primary": [],
+    "reserve": [],
+    "reserve_index": 0
+  },
+  "observation_goal": {
+    "kind": "wait",
+    "text": "补充观测",
+    "pitch": null,
+    "yaw": null,
+    "x": null,
+    "y": null,
+    "cell": null,
+    "attempt": 0,
+    "final_x": null,
+    "final_y": null,
+    "chase_to": null,
+    "cells": [
+      "最近左侧地面",
+      "最近一行左侧"
+    ],
+    "observation_x": -1.666188766579319,
+    "observation_y": -0.39341789378681746,
+    "observation_yaw": 0.09261137423044563,
+    "observation_pitch": 1.4414339376172411,
+    "observation_fallback": false
+  },
+  "metrics": {
+    "observation_unit": "settled_pose",
+    "distance_m": 0.0,
+    "observation_count": 1,
+    "observations": [
+      {
+        "cell": "最近一行左侧",
+        "cells": [
+          "最近一行左侧",
+          "最近一行右侧",
+          "最近右侧地面",
+          "右侧地面远一格"
+        ],
+        "attempt": 0,
+        "x": -1.745,
+        "y": 0.044,
+        "yaw_deg": -45.0,
+        "pitch_deg": -2.259757491001381,
+        "elapsed_s": 1.7080668240014347
+      }
+    ],
+    "manual_confirmed": []
+  },
+  "pitch_checks": {
+    "最近左侧地面": [],
+    "最近一行左侧": [],
+    "第三行左侧": [],
+    "最近一行右侧": [],
+    "最近右侧地面": [],
+    "右侧地面远一格": []
+  },
+  "conflicts": [],
+  "conflict_results": {},
+  "history": {
+    "最近左侧地面": [],
+    "最近一行左侧": [],
+    "第三行左侧": [],
+    "最近一行右侧": [],
+    "最近右侧地面": [],
+    "右侧地面远一格": []
+  },
+  "instructions": [
+    "1号：未确认；尚未看清",
+    "2号：未确认；尚未看清",
+    "3号：未确认；尚未看清",
+    "4号：未确认；尚未看清",
+    "5号：未确认；尚未看清",
+    "6号：未确认；尚未看清",
+    "执行换点指令，到位稳定后重新扫描",
+    "下一步（场地原点/右前角）：x=-1.577 m y=-0.584 m yaw=-45.0° 俯仰=-15.0°",
+    "观察落点：x=-1.577 m y=-0.584 m",
+    "本次完整观测姿态：x=-1.666 m y=-0.393 m yaw=+5.3° 俯仰=+1.4°；全部到位后计一次观测",
+    "观察任务：1号、2号"
+  ]
+}

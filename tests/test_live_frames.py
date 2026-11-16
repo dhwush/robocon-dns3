@@ -8,7 +8,8 @@ import pytest
 
 
 @pytest.mark.parametrize('source', ['static', 'radar', 'ros', 'laptop', 'host'])
-def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source):
+@pytest.mark.parametrize('headless', [False, True])
+def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source, headless):
     import cv2
     import view_field as vf
     from car_pose import CarPose, Setup, load_intrinsics
@@ -40,6 +41,14 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
     monkeypatch.setattr(cv2,'destroyAllWindows',lambda: None)
     keys = iter([-1,-1,ord('q')])
     monkeypatch.setattr(cv2,'waitKey',lambda delay: next(keys))
+    if headless:
+        from terminal_ui import LiveUI
+        monkeypatch.setattr(LiveUI,'waitKey',lambda self,delay: next(keys))
+        def forbidden(*args,**kwargs):
+            pytest.fail('SSH无窗口模式不能初始化图形后端或绘图')
+        for name in ('namedWindow','setMouseCallback','imshow','destroyAllWindows'):
+            monkeypatch.setattr(cv2,name,forbidden)
+        monkeypatch.setattr(vf,'paint_window',forbidden)
     votes = {n: Vote() for n in DISPLAY}
     pauses, suspensions = [], []
     session = SimpleNamespace(watch=None,pause=lambda: pauses.append(True),
@@ -59,7 +68,7 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
     monkeypatch.setattr('can_pose.CanPoseStream',lambda *args: stream)
     stream.error = '测试断流'
     monkeypatch.setattr(vf, 'open_radar', lambda args: pytest.fail('手动模式不应读取雷达') if source == 'static' else stream)
-    args = SimpleNamespace(mode='basic',pose_source=source,offline=False,survey_session=session,
+    args = SimpleNamespace(mode='basic',pose_source=source,offline=False,headless=headless,survey_session=session,
         survey_report=tmp_path/'report.json')
     assert vf._live(args,watch,CarPose(0,0,0)) == ['测试']
     assert len(seen) == (3 if source == 'static' else 2)

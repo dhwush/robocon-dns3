@@ -561,13 +561,30 @@ def main() -> None:
 
     import argparse
     parser = argparse.ArgumentParser(description="地图与实时雷达相机测试")
-    parser.add_argument("--pose-source", choices=("laptop", "host", "radar", "ros", "ssh", "local", "static"), default="laptop")
+    parser.add_argument("--pose-source", choices=("laptop", "host", "radar", "ros", "ssh", "local", "static"), default=None)
+    parser.add_argument("--headless", action="store_true", help="模式3：主机采集相机和雷达，通过SSH终端输出结果")
     parser.add_argument("--verify-motion", action="store_true", help="慢速移动验证识别框，雷达直接作为右前角场地位姿")
     parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
     parser.add_argument("--can-interface", default="can0")
     add_radar_arguments(parser)
     args = parser.parse_args()
+    import os
+    args.headless = args.headless or bool(os.environ.get('SSH_CONNECTION') and not os.environ.get('DISPLAY'))
+    args.pose_source = args.pose_source or ('host' if args.headless else 'laptop')
     normalize_source(args)
+    if args.headless:
+        # SSH没有桌面时直接进入同一识别循环，不创建地图/Qt窗口。
+        from view_field import run
+        args.mode='extend'
+        args.image=''
+        args.once=False
+        args.pose=(0.,0.,0.)
+        args.pose_is_default=True
+        args.pitch=None
+        args.aligned=False
+        args.center_to_corner=None
+        args.yaw_unit=''
+        return run(args)
     args.mode = "extend"
     pitch = load_setup(str(ROOT / "config" / "field.yaml")).pitch_deg
     intrinsics = load_intrinsics(str(ROOT / "config" / "intrinsics.yaml"))

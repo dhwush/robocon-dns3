@@ -15,6 +15,8 @@ python view_field.py extend
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from collections import deque
 import time
 from pathlib import Path
@@ -450,6 +452,12 @@ def prepare_start_confirmation(watch, source):
 
 def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     import cv2
+    from terminal_ui import LiveUI, terminal_results
+    headless = getattr(args, "headless", False)
+    ui = LiveUI(cv2, headless)
+    if headless:
+        print("SSH终端模式：相机和雷达由运行本程序的主机读取。", flush=True)
+        print("输入单个命令并回车：b 开始，c 确认，1-5 光线，d 诊断，n 切塔，s 保存，q 退出。", flush=True)
 
     try:
         import pyrealsense2 as rs
@@ -488,8 +496,8 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 and confirm_ui['height']-46 <= y <= confirm_ui['height']-8):
             confirm_ui['clicked'] = confirm_ui['target']
 
-    cv2.namedWindow(CAMERA_WINDOW, cv2.WINDOW_AUTOSIZE)
-    cv2.setMouseCallback(CAMERA_WINDOW, confirm_click)
+    ui.namedWindow(CAMERA_WINDOW, cv2.WINDOW_AUTOSIZE)
+    ui.setMouseCallback(CAMERA_WINDOW, confirm_click)
     if watch.autonomy is not None:
         print(f"自主识别记录：{args.survey_report}")
     pipeline, sensor, ready, lock, camera_frames = _open_camera(rs)
@@ -519,7 +527,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         _apply_light(sensor, rs, light)
         while True:
             if not ready.wait(0.05):
-                key = cv2.waitKey(1) & 0xFF
+                key = ui.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     return watch.lines(args.mode)
                 continue
@@ -544,25 +552,26 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     matched = getattr(radar_stream, "match_frame", radar_stream.match)(stamp)
                 if matched is None and history and np.isfinite(last_processed_stamp) and radar_stream.match() is not None:
                     # 同一个5Hz位姿对应的画面已处理完；等待新测量，不重复计票。
-                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                    if ui.waitKey(1) & 0xFF in (ord("q"), 27):
                         return watch.lines(args.mode)
                     continue
                 if matched is None:
                     suspend_for_radar(watch)
                     message = radar_pose_text(None) + '；' + (radar_stream.error or '等待与雷达时间匹配的新相机帧（差值上限0.15秒）')
                     confirm_ui['target'] = None
-                    cv2.imshow(CAMERA_WINDOW, paint_window(color, None, {}, [message]))
+                    if not headless:
+                        ui.imshow(CAMERA_WINDOW, paint_window(color, None, {}, [message]))
                     live_map = getattr(args, "live_map", None)
                     if live_map is not None:
                         live_map(None)
                     args.autonomous_map_lines = [message]
                     args.autonomous_route = {}
                     if debug_visible:
-                        cv2.imshow("颜色与深度诊断", color)
+                        ui.imshow("颜色与深度诊断", color)
                     if previous != message:
-                        print(message)
+                        print(message, flush=True)
                         previous = message
-                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                    if ui.waitKey(1) & 0xFF in (ord("q"), 27):
                         return watch.lines(args.mode)
                     continue
                 current = matched
@@ -613,9 +622,11 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             shown = watch.window_lines(result_mode)
             if source in ("radar", "ros", "laptop", "host"):
                 shown = [radar_pose_text(current)] + shown
+            if headless:
+                shown += terminal_results(watch)
             text = "\n".join(shown)
             if text != previous:
-                print(text)
+                print(text, flush=True)
                 previous = text
             locked = {name: vote.locked for name, vote in watch.votes.items()}
             shown_pitch = None if measured is None else watch.pitch
@@ -636,14 +647,15 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if watch.autonomy is not None:
                 metrics = watch.autonomy.metrics()
                 painted.append(f"本轮：观测{metrics['observation_count']}次，累计路程{metrics['distance_m']:.3f}米")
-            cv2.imshow(CAMERA_WINDOW, paint_window(color, watch.views, locked, painted,
-                                             show_boxes=source in ("radar", "ros", "laptop", "host"),
-                                             confirmation=confirm_ui["target"],
-                                             panels=None if args.mode == "static" else live_panels(watch, current, source,
-                                                 [shown[0]] + ([line for line in painted if line.startswith(("慢速验证", "CAN 接收年龄"))]))))
-            if debug_visible:
-                cv2.imshow("颜色与深度诊断", paint_diagnostics(color, depth, watch.views, debug_selected, locked))
-            key = cv2.waitKey(1) & 0xFF
+            if not headless:
+                ui.imshow(CAMERA_WINDOW, paint_window(color, watch.views, locked, painted,
+                                                 show_boxes=source in ("radar", "ros", "laptop", "host"),
+                                                 confirmation=confirm_ui["target"],
+                                                 panels=None if args.mode == "static" else live_panels(watch, current, source,
+                                                     [shown[0]] + ([line for line in painted if line.startswith(("慢速验证", "CAN 接收年龄"))]))))
+                if debug_visible:
+                    ui.imshow("颜色与深度诊断", paint_diagnostics(color, depth, watch.views, debug_selected, locked))
+            key = ui.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines
             if (key in (ord('b'), ord('B')) and watch.autonomy is not None
@@ -659,10 +671,16 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if target is not None and watch.autonomy is not None:
                 if watch.autonomy.confirm_current(target):
                     watch.autonomy.save(args.survey_report)
-            if key == ord("d"):
+            if headless and key == ord("d"):
+                from field_map import DISPLAY
+                name = DISPLAY[debug_selected % len(DISPLAY)]
+                view = (watch.views or {}).get(name)
+                print(f"{TOWER_NO[name]}号诊断：" + ("等待画面" if view is None else
+                      f"结果={view.conclusion} 方法={view.method} 原因={view.reason}"), flush=True)
+            elif key == ord("d"):
                 debug_visible = not debug_visible
                 if not debug_visible:
-                    cv2.destroyWindow("颜色与深度诊断")
+                    ui.destroyWindow("颜色与深度诊断")
             elif key == ord("n"):
                 debug_selected = (debug_selected + 1) % len(watch.votes)
             elif key == ord("s"):
@@ -696,7 +714,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         pipeline.stop()
         if radar_stream is not None and radar_stream is not getattr(args, "radar_stream", None):
             radar_stream.close()
-        cv2.destroyAllWindows()
+        ui.destroyAllWindows()
 
 
 def suspend_for_radar(watch):
@@ -766,9 +784,10 @@ def run(args) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="识别四块建塔格的状态")
+    parser = argparse.ArgumentParser(description="识别六个建塔点的状态")
     parser.add_argument("mode", choices=("basic", "extend", "static"))
-    parser.add_argument("--pose-source", choices=("laptop", "host", "radar", "ros", "ssh", "local", "static"), default="laptop")
+    parser.add_argument("--pose-source", choices=("laptop", "host", "radar", "ros", "ssh", "local", "static"), default=None)
+    parser.add_argument("--headless", action="store_true", help="无窗口运行，通过SSH终端输出结果和接收命令")
     parser.add_argument("--verify-motion", action="store_true", help="显示雷达位姿相对起始位置的变化")
     parser.add_argument("--ssh-host", default="volleyball@192.168.3.194")
     parser.add_argument("--can-interface", default="can0")
@@ -781,6 +800,10 @@ def main() -> None:
     parser.add_argument("--yaw-unit", choices=("rad", "deg"), default="")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    args.headless = args.headless or bool(os.environ.get("SSH_CONNECTION") and not os.environ.get("DISPLAY"))
+    args.pose_source = args.pose_source or ("host" if args.headless else "laptop")
+    if args.headless and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     args.pose_is_default = list(args.pose) == [0.0, 0.0, 0.0]
     run(args)
 

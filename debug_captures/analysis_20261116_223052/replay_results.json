@@ -1,0 +1,5329 @@
+[
+  {
+    "second": 10,
+    "no": 1,
+    "pitch_delta": -0.5,
+    "result": "2",
+    "method": "黄地",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 35,
+      "checks": [],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.9088851693352593,
+      "pitch_deg": 5.5,
+      "roll_deg": 0.0,
+      "yaw_deg": 49.70000000000001,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": []
+  },
+  {
+    "second": 10,
+    "no": 1,
+    "pitch_delta": 0,
+    "result": null,
+    "method": null,
+    "reason": "RGB轮廓顶高不符：可能识别到背景白块",
+    "cap": {
+      "candidates": 0,
+      "components": 35,
+      "checks": [],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.904359264903961,
+      "pitch_deg": 6.0,
+      "roll_deg": 0.0,
+      "yaw_deg": 49.70000000000001,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": []
+  },
+  {
+    "second": 10,
+    "no": 1,
+    "pitch_delta": 0.5,
+    "result": null,
+    "method": null,
+    "reason": "RGB轮廓顶高不符：可能识别到背景白块",
+    "cap": {
+      "candidates": 0,
+      "components": 35,
+      "checks": [],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.8996883361416135,
+      "pitch_deg": 6.5,
+      "roll_deg": 0.0,
+      "yaw_deg": 49.70000000000001,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": []
+  },
+  {
+    "second": 15,
+    "no": 1,
+    "pitch_delta": -0.5,
+    "result": null,
+    "method": null,
+    "reason": "轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "cap": {
+      "candidates": 0,
+      "components": 36,
+      "checks": [
+        {
+          "id": 3,
+          "bbox": [
+            562,
+            224,
+            3,
+            28
+          ],
+          "pixels": 52,
+          "inside_pixels": 52,
+          "coverage": 1.0,
+          "width_cm": 0.6287459358511371,
+          "width_limit_cm": 39.523661305591425,
+          "height_cm": 5.867711694600124,
+          "fill": 0.6190476190476191,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 49,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.9066747750342954,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": 47.0,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 3,
+        "bbox": [
+          562,
+          224,
+          3,
+          28
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 85.96853465337992,
+        "top_cm": 92.06684285930801,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      }
+    ]
+  },
+  {
+    "second": 15,
+    "no": 1,
+    "pitch_delta": 0,
+    "result": null,
+    "method": null,
+    "reason": "轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "cap": {
+      "candidates": 0,
+      "components": 36,
+      "checks": [
+        {
+          "id": 3,
+          "bbox": [
+            562,
+            224,
+            3,
+            28
+          ],
+          "pixels": 52,
+          "inside_pixels": 52,
+          "coverage": 1.0,
+          "width_cm": 0.628025420311575,
+          "width_limit_cm": 39.377136657087284,
+          "height_cm": 5.86098755180005,
+          "fill": 0.6190476190476191,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 49,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.9044898085383397,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": 47.0,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 3,
+        "bbox": [
+          562,
+          224,
+          3,
+          28
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 87.73322691153838,
+        "top_cm": 93.84323771889518,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      }
+    ]
+  },
+  {
+    "second": 15,
+    "no": 1,
+    "pitch_delta": 0.5,
+    "result": null,
+    "method": null,
+    "reason": "轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "cap": {
+      "candidates": 0,
+      "components": 36,
+      "checks": [
+        {
+          "id": 3,
+          "bbox": [
+            562,
+            224,
+            3,
+            28
+          ],
+          "pixels": 52,
+          "inside_pixels": 52,
+          "coverage": 1.0,
+          "width_cm": 0.6272570782047573,
+          "width_limit_cm": 39.23114513545567,
+          "height_cm": 5.853817072106172,
+          "fill": 0.6190476190476191,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 49,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 1.902159807769932,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": 47.0,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 3,
+        "bbox": [
+          562,
+          224,
+          3,
+          28
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 89.5009331084976,
+        "top_cm": 95.6235840432527,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 5,
+    "pitch_delta": -0.5,
+    "result": "2",
+    "method": "RGB接缝仲裁",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 30,
+          "bbox": [
+            1183,
+            201,
+            18,
+            9
+          ],
+          "pixels": 42,
+          "inside_pixels": 32,
+          "coverage": 0.7619047619047619,
+          "width_cm": 5.036656039705084,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.5180775272000866,
+          "fill": 0.25925925925925924,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 24,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 33,
+          "bbox": [
+            1227,
+            211,
+            13,
+            39
+          ],
+          "pixels": 302,
+          "inside_pixels": 302,
+          "coverage": 1.0,
+          "width_cm": 3.6375849175647823,
+          "width_limit_cm": 40.0,
+          "height_cm": 10.911669284533708,
+          "fill": 0.5956607495069034,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 282,
+          "need": 15,
+          "suspected": false
+        },
+        {
+          "id": 39,
+          "bbox": [
+            1067,
+            220,
+            127,
+            105
+          ],
+          "pixels": 7508,
+          "inside_pixels": 7508,
+          "coverage": 1.0,
+          "width_cm": 35.53640650236365,
+          "width_limit_cm": 40.0,
+          "height_cm": 29.377571150667674,
+          "fill": 0.5630296212973378,
+          "failures": [
+            "单色不是有面积的块状区域"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3419,
+          "blue_pixels": 3065,
+          "need": 375,
+          "suspected": false,
+          "bottom_cm": 70.73525454707622,
+          "top_cm": 100.53248180579,
+          "bottom_error_cm": 0.7352545470762251,
+          "top_error_cm": 10.532481805789995,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 25.0
+        },
+        {
+          "id": 52,
+          "bbox": [
+            1026,
+            265,
+            15,
+            15
+          ],
+          "pixels": 98,
+          "inside_pixels": 98,
+          "coverage": 1.0,
+          "width_cm": 4.197213366420903,
+          "width_limit_cm": 40.0,
+          "height_cm": 4.196795878666811,
+          "fill": 0.43555555555555553,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 85,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1230,
+            380,
+            2,
+            11
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 0.5596284488561204,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.077650311022328,
+          "fill": 0.7272727272727273,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 11,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 90,
+          "bbox": [
+            1232,
+            392,
+            6,
+            53
+          ],
+          "pixels": 163,
+          "inside_pixels": 163,
+          "coverage": 1.0,
+          "width_cm": 1.6788853465683613,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.8286787712894,
+          "fill": 0.5125786163522013,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 120,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 106,
+          "bbox": [
+            1249,
+            409,
+            3,
+            11
+          ],
+          "pixels": 25,
+          "inside_pixels": 25,
+          "coverage": 1.0,
+          "width_cm": 0.8394426732841807,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.077650311022328,
+          "fill": 0.7575757575757576,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 22,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 114,
+          "bbox": [
+            1249,
+            425,
+            31,
+            22
+          ],
+          "pixels": 211,
+          "inside_pixels": 211,
+          "coverage": 1.0,
+          "width_cm": 8.674240957269868,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.155300622044656,
+          "fill": 0.3093841642228739,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.45813344295390507,
+          "red_pixels": 0,
+          "blue_pixels": 112,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 116,
+          "bbox": [
+            1031,
+            427,
+            9,
+            3
+          ],
+          "pixels": 13,
+          "inside_pixels": 13,
+          "coverage": 1.0,
+          "width_cm": 2.518328019852542,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.8393591757333622,
+          "fill": 0.48148148148148145,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 7,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 2.5456135443191954,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 30,
+        "bbox": [
+          1183,
+          201,
+          18,
+          9
+        ],
+        "coverage": 0.7619047619047619,
+        "bottom_cm": 102.2977797012409,
+        "top_cm": 104.7647198491401,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 33,
+        "bbox": [
+          1227,
+          211,
+          13,
+          39
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 90.84812731956897,
+        "top_cm": 101.3478542550452,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 39,
+        "bbox": [
+          1067,
+          220,
+          127,
+          105
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 70.73525454707622,
+        "top_cm": 100.53248180579,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 5.6338681764331096,
+        "ownership_score_m": 0.0563386817643311
+      },
+      {
+        "component": 52,
+        "bbox": [
+          1026,
+          265,
+          15,
+          15
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 84.34504401447789,
+        "top_cm": 88.8167765286938,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1230,
+          380,
+          2,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 52.63529772465877,
+        "top_cm": 55.63192244672981,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 90,
+        "bbox": [
+          1232,
+          392,
+          6,
+          53
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 37.947925355251584,
+        "top_cm": 52.391478989095056,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 106,
+        "bbox": [
+          1249,
+          409,
+          3,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 44.93351087942083,
+        "top_cm": 47.90846060833101,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 114,
+        "bbox": [
+          1249,
+          425,
+          31,
+          22
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 37.81788606466937,
+        "top_cm": 43.73731368899858,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 116,
+        "bbox": [
+          1031,
+          427,
+          9,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 39.37689442440003,
+        "top_cm": 40.28092168352288,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 6,
+    "pitch_delta": -0.5,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 46,
+          "bbox": [
+            619,
+            260,
+            10,
+            14
+          ],
+          "pixels": 61,
+          "inside_pixels": 2,
+          "coverage": 0.03278688524590164,
+          "width_cm": 5.166146300845669,
+          "width_limit_cm": 36.26073451733224,
+          "height_cm": 7.231885409593573,
+          "fill": 0.4357142857142857,
+          "failures": [
+            "格内覆盖不足35%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 20,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 62,
+          "bbox": [
+            617,
+            280,
+            9,
+            9
+          ],
+          "pixels": 23,
+          "inside_pixels": 23,
+          "coverage": 1.0,
+          "width_cm": 4.649531670761102,
+          "width_limit_cm": 36.26073451733224,
+          "height_cm": 4.6490691918815825,
+          "fill": 0.2839506172839506,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 10,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 74,
+          "bbox": [
+            619,
+            312,
+            2,
+            12
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 1.0332292601691337,
+          "width_limit_cm": 36.26073451733224,
+          "height_cm": 6.198758922508777,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 91,
+          "bbox": [
+            749,
+            397,
+            25,
+            3
+          ],
+          "pixels": 29,
+          "inside_pixels": 29,
+          "coverage": 1.0,
+          "width_cm": 12.915365752114171,
+          "width_limit_cm": 36.26073451733224,
+          "height_cm": 1.5496897306271942,
+          "fill": 0.38666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 28,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.6999083131845385,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 62,
+        "bbox": [
+          617,
+          280,
+          9,
+          9
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 91.93521321514204,
+        "top_cm": 96.56691856167622,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 74,
+        "bbox": [
+          619,
+          312,
+          2,
+          12
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 73.88575164622621,
+        "top_cm": 80.0818653983798,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.90194312392321,
+        "ownership_score_m": 0.0690194312392321
+      },
+      {
+        "component": 91,
+        "bbox": [
+          749,
+          397,
+          25,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 34.81440709609,
+        "top_cm": 36.359484860837625,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 5,
+    "pitch_delta": 0,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 33,
+          "bbox": [
+            1227,
+            211,
+            13,
+            39
+          ],
+          "pixels": 302,
+          "inside_pixels": 302,
+          "coverage": 1.0,
+          "width_cm": 3.6347757869057173,
+          "width_limit_cm": 40.0,
+          "height_cm": 10.903242730811002,
+          "fill": 0.5956607495069034,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 282,
+          "need": 15,
+          "suspected": false
+        },
+        {
+          "id": 39,
+          "bbox": [
+            1067,
+            220,
+            127,
+            105
+          ],
+          "pixels": 7508,
+          "inside_pixels": 7427,
+          "coverage": 0.9892115077250933,
+          "width_cm": 35.50896345669432,
+          "width_limit_cm": 40.0,
+          "height_cm": 29.354884275260396,
+          "fill": 0.5630296212973378,
+          "failures": [
+            "单色不是有面积的块状区域"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3419,
+          "blue_pixels": 3065,
+          "need": 375,
+          "suspected": false,
+          "bottom_cm": 73.00390323621015,
+          "top_cm": 102.83269837311857,
+          "bottom_error_cm": 3.003903236210148,
+          "top_error_cm": 12.832698373118568,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 25.0
+        },
+        {
+          "id": 52,
+          "bbox": [
+            1026,
+            265,
+            15,
+            15
+          ],
+          "pixels": 98,
+          "inside_pixels": 98,
+          "coverage": 1.0,
+          "width_cm": 4.193972061814289,
+          "width_limit_cm": 40.0,
+          "height_cm": 4.193554896465771,
+          "fill": 0.43555555555555553,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 85,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1230,
+            380,
+            2,
+            11
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 0.5591962749085719,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.075273590741565,
+          "fill": 0.7272727272727273,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 11,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 90,
+          "bbox": [
+            1232,
+            392,
+            6,
+            53
+          ],
+          "pixels": 163,
+          "inside_pixels": 163,
+          "coverage": 1.0,
+          "width_cm": 1.6775888247257158,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.817227300845722,
+          "fill": 0.5125786163522013,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 120,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 106,
+          "bbox": [
+            1249,
+            409,
+            3,
+            11
+          ],
+          "pixels": 25,
+          "inside_pixels": 25,
+          "coverage": 1.0,
+          "width_cm": 0.8387944123628579,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.075273590741565,
+          "fill": 0.7575757575757576,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 22,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 114,
+          "bbox": [
+            1249,
+            425,
+            31,
+            22
+          ],
+          "pixels": 211,
+          "inside_pixels": 211,
+          "coverage": 1.0,
+          "width_cm": 8.667542261082865,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.15054718148313,
+          "fill": 0.3093841642228739,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.4584885795313012,
+          "red_pixels": 0,
+          "blue_pixels": 112,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 116,
+          "bbox": [
+            1031,
+            427,
+            9,
+            3
+          ],
+          "pixels": 13,
+          "inside_pixels": 13,
+          "coverage": 1.0,
+          "width_cm": 2.516383237088574,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.838710979293154,
+          "fill": 0.48148148148148145,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 7,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 2.5436476902661536,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 33,
+        "bbox": [
+          1227,
+          211,
+          13,
+          39
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 93.02273512636023,
+        "top_cm": 103.53924974901403,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 39,
+        "bbox": [
+          1067,
+          220,
+          127,
+          105
+        ],
+        "coverage": 0.9892115077250933,
+        "bottom_cm": 73.00390323621015,
+        "top_cm": 102.83269837311857,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.918300804664358,
+        "ownership_score_m": 0.07918300804664358
+      },
+      {
+        "component": 52,
+        "bbox": [
+          1026,
+          265,
+          15,
+          15
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 86.73747307481601,
+        "top_cm": 91.21411112395398,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1230,
+          380,
+          2,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 54.79845556477984,
+        "top_cm": 57.7935119861842,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 90,
+        "bbox": [
+          1232,
+          392,
+          6,
+          53
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 40.121223611509805,
+        "top_cm": 54.55068958364261,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 106,
+        "bbox": [
+          1249,
+          409,
+          3,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 47.08294918428994,
+        "top_cm": 50.055189114315056,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 114,
+        "bbox": [
+          1249,
+          425,
+          31,
+          22
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 39.96159390581147,
+        "top_cm": 45.873951853112,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 116,
+        "bbox": [
+          1031,
+          427,
+          9,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 41.77368559331596,
+        "top_cm": 42.67656958295462,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 6,
+    "pitch_delta": 0,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 62,
+          "bbox": [
+            617,
+            280,
+            9,
+            9
+          ],
+          "pixels": 23,
+          "inside_pixels": 21,
+          "coverage": 0.9130434782608695,
+          "width_cm": 4.648317745570261,
+          "width_limit_cm": 36.2196947565277,
+          "height_cm": 4.647855387437261,
+          "fill": 0.2839506172839506,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 10,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 74,
+          "bbox": [
+            619,
+            312,
+            2,
+            12
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 1.0329594990156137,
+          "width_limit_cm": 36.2196947565277,
+          "height_cm": 6.197140516583015,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 91,
+          "bbox": [
+            749,
+            397,
+            25,
+            3
+          ],
+          "pixels": 29,
+          "inside_pixels": 29,
+          "coverage": 1.0,
+          "width_cm": 12.911993737695171,
+          "width_limit_cm": 36.2196947565277,
+          "height_cm": 1.5492851291457537,
+          "fill": 0.38666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 28,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.698681235384017,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 62,
+        "bbox": [
+          617,
+          280,
+          9,
+          9
+        ],
+        "coverage": 0.9130434782608695,
+        "bottom_cm": 96.06253212215196,
+        "top_cm": 100.69918374944629,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 74,
+        "bbox": [
+          619,
+          312,
+          2,
+          12
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 78.00183620770828,
+        "top_cm": 84.20059828384598,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.900618961931149,
+        "ownership_score_m": 0.06900618961931149
+      },
+      {
+        "component": 91,
+        "bbox": [
+          749,
+          397,
+          25,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 38.90462387053273,
+        "top_cm": 40.44799763363099,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 5,
+    "pitch_delta": 0.5,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 33,
+          "bbox": [
+            1227,
+            211,
+            13,
+            39
+          ],
+          "pixels": 302,
+          "inside_pixels": 290,
+          "coverage": 0.9602649006622517,
+          "width_cm": 3.631689853997872,
+          "width_limit_cm": 40.0,
+          "height_cm": 10.893985852940723,
+          "fill": 0.5956607495069034,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 282,
+          "need": 15,
+          "suspected": false
+        },
+        {
+          "id": 39,
+          "bbox": [
+            1067,
+            220,
+            127,
+            105
+          ],
+          "pixels": 7508,
+          "inside_pixels": 7241,
+          "coverage": 0.9644379328716036,
+          "width_cm": 35.47881626597921,
+          "width_limit_cm": 40.0,
+          "height_cm": 29.329961911763487,
+          "fill": 0.5630296212973378,
+          "failures": [
+            "单色不是有面积的块状区域"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3419,
+          "blue_pixels": 3065,
+          "need": 375,
+          "suspected": false,
+          "bottom_cm": 75.27307911716466,
+          "top_cm": 105.13636025721473,
+          "bottom_error_cm": 5.2730791171646585,
+          "top_error_cm": 15.136360257214731,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 25.0
+        },
+        {
+          "id": 52,
+          "bbox": [
+            1026,
+            265,
+            15,
+            15
+          ],
+          "pixels": 98,
+          "inside_pixels": 98,
+          "coverage": 1.0,
+          "width_cm": 4.190411369997545,
+          "width_limit_cm": 40.0,
+          "height_cm": 4.189994558823354,
+          "fill": 0.43555555555555553,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 85,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1230,
+            380,
+            2,
+            11
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 0.5587215159996727,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.0726626764704603,
+          "fill": 0.7272727272727273,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 11,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 90,
+          "bbox": [
+            1232,
+            392,
+            6,
+            53
+          ],
+          "pixels": 163,
+          "inside_pixels": 163,
+          "coverage": 1.0,
+          "width_cm": 1.6761645479990182,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.804647441175852,
+          "fill": 0.5125786163522013,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 120,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 106,
+          "bbox": [
+            1249,
+            409,
+            3,
+            11
+          ],
+          "pixels": 25,
+          "inside_pixels": 25,
+          "coverage": 1.0,
+          "width_cm": 0.8380822739995091,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.0726626764704603,
+          "fill": 0.7575757575757576,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 22,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 114,
+          "bbox": [
+            1249,
+            425,
+            31,
+            22
+          ],
+          "pixels": 211,
+          "inside_pixels": 211,
+          "coverage": 1.0,
+          "width_cm": 8.660183497994925,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.145325352940921,
+          "fill": 0.3093841642228739,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.45880880042825506,
+          "red_pixels": 0,
+          "blue_pixels": 112,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 116,
+          "bbox": [
+            1031,
+            427,
+            9,
+            3
+          ],
+          "pixels": 13,
+          "inside_pixels": 13,
+          "coverage": 1.0,
+          "width_cm": 2.5142468219985266,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.8379989117646711,
+          "fill": 0.48148148148148145,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 7,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 2.541488127593365,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 33,
+        "bbox": [
+          1227,
+          211,
+          13,
+          39
+        ],
+        "coverage": 0.9602649006622517,
+        "bottom_cm": 95.19959727237473,
+        "top_cm": 105.7338607458715,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 39,
+        "bbox": [
+          1067,
+          220,
+          127,
+          105
+        ],
+        "coverage": 0.9644379328716036,
+        "bottom_cm": 75.27307911716466,
+        "top_cm": 105.13636025721473,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 10.204719687189694,
+        "ownership_score_m": 0.10204719687189695
+      },
+      {
+        "component": 52,
+        "bbox": [
+          1026,
+          265,
+          15,
+          15
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 89.131922187892,
+        "top_cm": 93.61394218090524,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1230,
+          380,
+          2,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 56.96050018941221,
+        "top_cm": 59.95425145033778,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 90,
+        "bbox": [
+          1232,
+          392,
+          6,
+          53
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 42.29211286204282,
+        "top_cm": 56.708769182673976,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 106,
+        "bbox": [
+          1249,
+          409,
+          3,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 49.230623118501136,
+        "top_cm": 52.20041225880953,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 114,
+        "bbox": [
+          1249,
+          425,
+          31,
+          22
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 42.102940559227754,
+        "top_cm": 48.008742918584566,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 116,
+        "bbox": [
+          1031,
+          427,
+          9,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 44.16777622908863,
+        "top_cm": 45.069613063813684,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 40,
+    "no": 6,
+    "pitch_delta": 0.5,
+    "result": "2",
+    "method": "黄地",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 170,
+      "checks": [
+        {
+          "id": 74,
+          "bbox": [
+            619,
+            312,
+            2,
+            12
+          ],
+          "pixels": 16,
+          "inside_pixels": 16,
+          "coverage": 1.0,
+          "width_cm": 1.032611073996978,
+          "width_limit_cm": 36.17864198790132,
+          "height_cm": 6.195050174413708,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 91,
+          "bbox": [
+            749,
+            397,
+            25,
+            3
+          ],
+          "pixels": 29,
+          "inside_pixels": 29,
+          "coverage": 1.0,
+          "width_cm": 12.907638424962226,
+          "width_limit_cm": 36.17864198790132,
+          "height_cm": 1.548762543603427,
+          "fill": 0.38666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 28,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.697096334815735,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.3,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 74,
+        "bbox": [
+          619,
+          312,
+          2,
+          12
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 82.11952345365307,
+        "top_cm": 88.32188177787063,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 91,
+        "bbox": [
+          749,
+          397,
+          25,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 42.99052946011129,
+        "top_cm": 44.532433496837704,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 5,
+    "pitch_delta": -0.5,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 179,
+      "checks": [
+        {
+          "id": 42,
+          "bbox": [
+            1231,
+            200,
+            12,
+            40
+          ],
+          "pixels": 218,
+          "inside_pixels": 218,
+          "coverage": 1.0,
+          "width_cm": 3.3533946350435437,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.176870267057742,
+          "fill": 0.45416666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 182,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 48,
+          "bbox": [
+            1067,
+            211,
+            27,
+            46
+          ],
+          "pixels": 701,
+          "inside_pixels": 677,
+          "coverage": 0.9657631954350927,
+          "width_cm": 7.545137928847972,
+          "width_limit_cm": 40.0,
+          "height_cm": 12.853400807116405,
+          "fill": 0.5644122383252818,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 509,
+          "need": 35,
+          "suspected": false
+        },
+        {
+          "id": 61,
+          "bbox": [
+            1090,
+            238,
+            106,
+            78
+          ],
+          "pixels": 7169,
+          "inside_pixels": 7169,
+          "coverage": 1.0,
+          "width_cm": 29.621652609551308,
+          "width_limit_cm": 40.0,
+          "height_cm": 21.794897020762598,
+          "fill": 0.8670778906627963,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3693,
+          "blue_pixels": 3153,
+          "need": 358,
+          "suspected": true,
+          "suspected_bottom_cm": 73.2295971858063,
+          "suspected_top_cm": 95.11025928313299,
+          "bottom_cm": 73.2295971858063,
+          "top_cm": 95.11025928313299,
+          "bottom_error_cm": 3.229597185806299,
+          "top_error_cm": 5.11025928313299,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 20.0,
+          "result": "红"
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1057,
+            256,
+            1,
+            41
+          ],
+          "pixels": 41,
+          "inside_pixels": 41,
+          "coverage": 1.0,
+          "width_cm": 0.27944955292029533,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.456292023734187,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 41,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 71,
+          "bbox": [
+            1028,
+            260,
+            7,
+            10
+          ],
+          "pixels": 47,
+          "inside_pixels": 47,
+          "coverage": 1.0,
+          "width_cm": 1.956146870442067,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.7942175667644356,
+          "fill": 0.6714285714285714,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 34,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 95,
+          "bbox": [
+            1235,
+            366,
+            7,
+            3
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.956146870442067,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.8382652700293308,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 100,
+          "bbox": [
+            1233,
+            384,
+            6,
+            52
+          ],
+          "pixels": 128,
+          "inside_pixels": 128,
+          "coverage": 1.0,
+          "width_cm": 1.6766973175217719,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.529931347175069,
+          "fill": 0.41025641025641024,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 106,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 134,
+          "bbox": [
+            1253,
+            417,
+            18,
+            23
+          ],
+          "pixels": 234,
+          "inside_pixels": 234,
+          "coverage": 1.0,
+          "width_cm": 5.030091952565316,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.426700403558202,
+          "fill": 0.5652173913043478,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 136,
+          "need": 11,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        61
+      ],
+      "distance_m": 2.5422959405365746,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 42,
+        "bbox": [
+          1231,
+          200,
+          12,
+          40
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 93.36582425000731,
+        "top_cm": 104.05369019555191,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 48,
+        "bbox": [
+          1067,
+          211,
+          27,
+          46
+        ],
+        "coverage": 0.9657631954350927,
+        "bottom_cm": 90.4923789577615,
+        "top_cm": 103.75913867340871,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 61,
+        "bbox": [
+          1090,
+          238,
+          106,
+          78
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 73.2295971858063,
+        "top_cm": 95.11025928313299,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 4.169928234469644,
+        "ownership_score_m": 0.04169928234469644
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1057,
+          256,
+          1,
+          41
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 79.05317321390534,
+        "top_cm": 91.05373321194722,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 5.053453212926279,
+        "ownership_score_m": 0.05053453212926279
+      },
+      {
+        "component": 71,
+        "bbox": [
+          1028,
+          260,
+          7,
+          10
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 87.22116524602045,
+        "top_cm": 90.18472614350783,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 95,
+        "bbox": [
+          1235,
+          366,
+          7,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 58.70317647333771,
+        "top_cm": 59.51235498891544,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 100,
+        "bbox": [
+          1233,
+          384,
+          6,
+          52
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 40.556342018786154,
+        "top_cm": 54.639732468841,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 134,
+        "bbox": [
+          1253,
+          417,
+          18,
+          23
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 39.8088863458901,
+        "top_cm": 45.970614510826316,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 6,
+    "pitch_delta": -0.5,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 179,
+      "checks": [
+        {
+          "id": 64,
+          "bbox": [
+            756,
+            253,
+            3,
+            22
+          ],
+          "pixels": 28,
+          "inside_pixels": 4,
+          "coverage": 0.14285714285714285,
+          "width_cm": 1.5445108403358598,
+          "width_limit_cm": 36.234742479434864,
+          "height_cm": 11.325286215292994,
+          "fill": 0.42424242424242425,
+          "failures": [
+            "格内覆盖不足35%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            618,
+            305,
+            6,
+            8
+          ],
+          "pixels": 15,
+          "inside_pixels": 15,
+          "coverage": 1.0,
+          "width_cm": 3.0890216806717197,
+          "width_limit_cm": 36.234742479434864,
+          "height_cm": 4.118285896470179,
+          "fill": 0.3125,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 4,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.683735816198802,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 86,
+        "bbox": [
+          618,
+          305,
+          6,
+          8
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 79.50683942139021,
+        "top_cm": 83.61385782528691,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.946490798051648,
+        "ownership_score_m": 0.07946490798051647
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 5,
+    "pitch_delta": 0,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 179,
+      "checks": [
+        {
+          "id": 42,
+          "bbox": [
+            1231,
+            200,
+            12,
+            40
+          ],
+          "pixels": 218,
+          "inside_pixels": 204,
+          "coverage": 0.9357798165137615,
+          "width_cm": 3.350800090668632,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.168222646053799,
+          "fill": 0.45416666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 182,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 48,
+          "bbox": [
+            1067,
+            211,
+            27,
+            46
+          ],
+          "pixels": 701,
+          "inside_pixels": 536,
+          "coverage": 0.7646219686162625,
+          "width_cm": 7.539300204004422,
+          "width_limit_cm": 40.0,
+          "height_cm": 12.84345604296187,
+          "fill": 0.5644122383252818,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 509,
+          "need": 35,
+          "suspected": false
+        },
+        {
+          "id": 61,
+          "bbox": [
+            1090,
+            238,
+            106,
+            78
+          ],
+          "pixels": 7169,
+          "inside_pixels": 7169,
+          "coverage": 1.0,
+          "width_cm": 29.598734134239578,
+          "width_limit_cm": 40.0,
+          "height_cm": 21.77803415980491,
+          "fill": 0.8670778906627963,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3693,
+          "blue_pixels": 3153,
+          "need": 358,
+          "suspected": true,
+          "suspected_bottom_cm": 75.47236569125735,
+          "suspected_top_cm": 97.37477537700114,
+          "bottom_cm": 75.47236569125735,
+          "top_cm": 97.37477537700114,
+          "bottom_error_cm": 5.472365691257353,
+          "top_error_cm": 7.374775377001141,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 20.0,
+          "result": "红"
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1057,
+            256,
+            1,
+            41
+          ],
+          "pixels": 41,
+          "inside_pixels": 41,
+          "coverage": 1.0,
+          "width_cm": 0.27923334088905266,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.447428212205145,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 41,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 71,
+          "bbox": [
+            1028,
+            260,
+            7,
+            10
+          ],
+          "pixels": 47,
+          "inside_pixels": 47,
+          "coverage": 1.0,
+          "width_cm": 1.9546333862233687,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.7920556615134497,
+          "fill": 0.6714285714285714,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 34,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 95,
+          "bbox": [
+            1235,
+            366,
+            7,
+            3
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.9546333862233687,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.837616698454035,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 100,
+          "bbox": [
+            1233,
+            384,
+            6,
+            52
+          ],
+          "pixels": 128,
+          "inside_pixels": 128,
+          "coverage": 1.0,
+          "width_cm": 1.675400045334316,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.51868943986994,
+          "fill": 0.41025641025641024,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 106,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 134,
+          "bbox": [
+            1253,
+            417,
+            18,
+            23
+          ],
+          "pixels": 234,
+          "inside_pixels": 234,
+          "coverage": 1.0,
+          "width_cm": 5.026200136002948,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.421728021480935,
+          "fill": 0.5652173913043478,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 136,
+          "need": 11,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        61
+      ],
+      "distance_m": 2.540328948771588,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 42,
+        "bbox": [
+          1231,
+          200,
+          12,
+          40
+        ],
+        "coverage": 0.9357798165137615,
+        "bottom_cm": 95.5294401842551,
+        "top_cm": 106.2359668035989,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 48,
+        "bbox": [
+          1067,
+          211,
+          27,
+          46
+        ],
+        "coverage": 0.7646219686162625,
+        "bottom_cm": 92.82078329307875,
+        "top_cm": 106.1094306496716,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 61,
+        "bbox": [
+          1090,
+          238,
+          106,
+          78
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 75.47236569125735,
+        "top_cm": 97.37477537700114,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.423570534129247,
+        "ownership_score_m": 0.06423570534129247
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1057,
+          256,
+          1,
+          41
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 81.39703816603856,
+        "top_cm": 93.40996180355503,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.403499984796791,
+        "ownership_score_m": 0.07403499984796791
+      },
+      {
+        "component": 71,
+        "bbox": [
+          1028,
+          260,
+          7,
+          10
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 89.60404491636417,
+        "top_cm": 92.57120332334112,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 95,
+        "bbox": [
+          1235,
+          366,
+          7,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 60.844931694279566,
+        "top_cm": 61.653886484540934,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 100,
+        "bbox": [
+          1233,
+          384,
+          6,
+          52
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 42.714391241341644,
+        "top_cm": 56.78562270577948,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 134,
+        "bbox": [
+          1253,
+          417,
+          18,
+          23
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 41.942042061545784,
+        "top_cm": 48.09698659477234,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 6,
+    "pitch_delta": 0,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 179,
+      "checks": [
+        {
+          "id": 86,
+          "bbox": [
+            618,
+            305,
+            6,
+            8
+          ],
+          "pixels": 15,
+          "inside_pixels": 15,
+          "coverage": 1.0,
+          "width_cm": 3.0882087394659976,
+          "width_limit_cm": 36.19546644325852,
+          "height_cm": 4.117202082677894,
+          "fill": 0.3125,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 4,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.682503192334255,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 86,
+        "bbox": [
+          618,
+          305,
+          6,
+          8
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 83.60517315282672,
+        "top_cm": 87.71465418304658,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 5,
+    "pitch_delta": 0.5,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 179,
+      "checks": [
+        {
+          "id": 42,
+          "bbox": [
+            1231,
+            200,
+            12,
+            40
+          ],
+          "pixels": 218,
+          "inside_pixels": 154,
+          "coverage": 0.7064220183486238,
+          "width_cm": 3.347950369893667,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.15872452165583,
+          "fill": 0.45416666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 182,
+          "need": 10,
+          "suspected": false
+        },
+        {
+          "id": 48,
+          "bbox": [
+            1067,
+            211,
+            27,
+            46
+          ],
+          "pixels": 701,
+          "inside_pixels": 402,
+          "coverage": 0.5734664764621968,
+          "width_cm": 7.532888332260749,
+          "width_limit_cm": 40.0,
+          "height_cm": 12.832533199904203,
+          "fill": 0.5644122383252818,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 509,
+          "need": 35,
+          "suspected": false
+        },
+        {
+          "id": 61,
+          "bbox": [
+            1090,
+            238,
+            106,
+            78
+          ],
+          "pixels": 7169,
+          "inside_pixels": 7169,
+          "coverage": 1.0,
+          "width_cm": 29.573561600727384,
+          "width_limit_cm": 40.0,
+          "height_cm": 21.759512817228867,
+          "fill": 0.8670778906627963,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 3693,
+          "blue_pixels": 3153,
+          "need": 358,
+          "suspected": true,
+          "suspected_bottom_cm": 77.71589524992784,
+          "suspected_top_cm": 99.64217939453872,
+          "bottom_cm": 77.71589524992784,
+          "top_cm": 99.64217939453872,
+          "bottom_error_cm": 7.715895249927851,
+          "top_error_cm": 9.642179394538719,
+          "horizontal_overlap": 1.0,
+          "vertical_gap_px": 20.0,
+          "result": "红"
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1057,
+            256,
+            1,
+            41
+          ],
+          "pixels": 41,
+          "inside_pixels": 41,
+          "coverage": 1.0,
+          "width_cm": 0.27899586415780553,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.437692634697227,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 41,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 71,
+          "bbox": [
+            1028,
+            260,
+            7,
+            10
+          ],
+          "pixels": 47,
+          "inside_pixels": 47,
+          "coverage": 1.0,
+          "width_cm": 1.9529710491046386,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.7896811304139577,
+          "fill": 0.6714285714285714,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 34,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 95,
+          "bbox": [
+            1235,
+            366,
+            7,
+            3
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.9529710491046386,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.8369043391241872,
+          "fill": 0.6666666666666666,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 9,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 100,
+          "bbox": [
+            1233,
+            384,
+            6,
+            52
+          ],
+          "pixels": 128,
+          "inside_pixels": 128,
+          "coverage": 1.0,
+          "width_cm": 1.6739751849468334,
+          "width_limit_cm": 40.0,
+          "height_cm": 14.50634187815258,
+          "fill": 0.41025641025641024,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 106,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 134,
+          "bbox": [
+            1253,
+            417,
+            18,
+            23
+          ],
+          "pixels": 234,
+          "inside_pixels": 234,
+          "coverage": 1.0,
+          "width_cm": 5.0219255548405,
+          "width_limit_cm": 40.0,
+          "height_cm": 6.416266599952102,
+          "fill": 0.5652173913043478,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 136,
+          "need": 11,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        61
+      ],
+      "distance_m": 2.53816850112187,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 42,
+        "bbox": [
+          1231,
+          200,
+          12,
+          40
+        ],
+        "coverage": 0.7064220183486238,
+        "bottom_cm": 97.69555075558036,
+        "top_cm": 108.42172970369491,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 48,
+        "bbox": [
+          1067,
+          211,
+          27,
+          46
+        ],
+        "coverage": 0.5734664764621968,
+        "bottom_cm": 95.15176296395886,
+        "top_cm": 108.46369491758503,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 61,
+        "bbox": [
+          1090,
+          238,
+          106,
+          78
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 77.71589524992784,
+        "top_cm": 99.64217939453872,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 8.679037322233285,
+        "ownership_score_m": 0.08679037322233285
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1057,
+          256,
+          1,
+          41
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 83.74233644973799,
+        "top_cm": 95.76888042973424,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 71,
+        "bbox": [
+          1028,
+          260,
+          7,
+          10
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 91.98926689768318,
+        "top_cm": 94.96034216147726,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 95,
+        "bbox": [
+          1235,
+          366,
+          7,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 62.98610331680716,
+        "top_cm": 63.794905366618885,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 100,
+        "bbox": [
+          1233,
+          384,
+          6,
+          52
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 44.8702467715003,
+        "top_cm": 58.93057062228808,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 134,
+        "bbox": [
+          1253,
+          417,
+          18,
+          23
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 44.072985079997665,
+        "top_cm": 50.22168502829785,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 100,
+    "no": 6,
+    "pitch_delta": 0.5,
+    "result": "2",
+    "method": "黄地",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 179,
+      "checks": [
+        {
+          "id": 86,
+          "bbox": [
+            618,
+            305,
+            6,
+            8
+          ],
+          "pixels": 15,
+          "inside_pixels": 15,
+          "coverage": 1.0,
+          "width_cm": 3.08716061920828,
+          "width_limit_cm": 36.15617275923056,
+          "height_cm": 4.115804728006616,
+          "fill": 0.3125,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 4,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.680913977722563,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -31.900000000000002,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 86,
+        "bbox": [
+          618,
+          305,
+          6,
+          8
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 87.70596560213278,
+        "top_cm": 91.8185387277441,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 5,
+    "pitch_delta": -0.5,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 101,
+      "checks": [
+        {
+          "id": 18,
+          "bbox": [
+            919,
+            139,
+            361,
+            581
+          ],
+          "pixels": 10294,
+          "inside_pixels": 5423,
+          "coverage": 0.526811734991257,
+          "width_cm": 76.46262859919591,
+          "width_limit_cm": 40.0,
+          "height_cm": 123.04811185162608,
+          "fill": 0.04907957909993754,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.8299134207491881,
+          "red_pixels": 8142,
+          "blue_pixels": 395,
+          "need": 514,
+          "suspected": false
+        },
+        {
+          "id": 23,
+          "bbox": [
+            1133,
+            156,
+            10,
+            4
+          ],
+          "pixels": 25,
+          "inside_pixels": 25,
+          "coverage": 1.0,
+          "width_cm": 2.1180783545483632,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.847147069546479,
+          "fill": 0.625,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 15,
+          "blue_pixels": 1,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 26,
+          "bbox": [
+            1111,
+            207,
+            8,
+            5
+          ],
+          "pixels": 26,
+          "inside_pixels": 26,
+          "coverage": 1.0,
+          "width_cm": 1.6944626836386905,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.058933836933099,
+          "fill": 0.65,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 29,
+          "bbox": [
+            1022,
+            216,
+            12,
+            3
+          ],
+          "pixels": 19,
+          "inside_pixels": 19,
+          "coverage": 1.0,
+          "width_cm": 2.5416940254580354,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.6353603021598593,
+          "fill": 0.5277777777777778,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 12,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 31,
+          "bbox": [
+            1023,
+            225,
+            125,
+            109
+          ],
+          "pixels": 11321,
+          "inside_pixels": 11321,
+          "coverage": 1.0,
+          "width_cm": 26.47597943185454,
+          "width_limit_cm": 40.0,
+          "height_cm": 23.084757645141554,
+          "fill": 0.8308990825688073,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 6089,
+          "blue_pixels": 3904,
+          "need": 566,
+          "suspected": true,
+          "suspected_bottom_cm": 68.00606234690024,
+          "suspected_top_cm": 91.35261764827044,
+          "bottom_cm": 68.00606234690024,
+          "top_cm": 91.35261764827044,
+          "bottom_error_cm": -1.9939376530997643,
+          "top_error_cm": 1.3526176482704377,
+          "horizontal_overlap": 0.991869918699187,
+          "vertical_gap_px": 23.0,
+          "result": "红"
+        },
+        {
+          "id": 36,
+          "bbox": [
+            1166,
+            266,
+            69,
+            18
+          ],
+          "pixels": 985,
+          "inside_pixels": 985,
+          "coverage": 1.0,
+          "width_cm": 14.614740646383705,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.812161812959156,
+          "fill": 0.7930756843800322,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 369,
+          "blue_pixels": 3,
+          "need": 49,
+          "suspected": false
+        },
+        {
+          "id": 38,
+          "bbox": [
+            1016,
+            269,
+            7,
+            2
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.4826548481838542,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.4235735347732395,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 42,
+          "bbox": [
+            969,
+            273,
+            22,
+            24
+          ],
+          "pixels": 115,
+          "inside_pixels": 115,
+          "coverage": 1.0,
+          "width_cm": 4.659772380006399,
+          "width_limit_cm": 40.0,
+          "height_cm": 5.082882417278874,
+          "fill": 0.2178030303030303,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 82,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 43,
+          "bbox": [
+            1153,
+            272,
+            4,
+            4
+          ],
+          "pixels": 12,
+          "inside_pixels": 12,
+          "coverage": 1.0,
+          "width_cm": 0.8472313418193452,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.847147069546479,
+          "fill": 0.75,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 12,
+          "blue_pixels": 0,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 49,
+          "bbox": [
+            1239,
+            306,
+            5,
+            5
+          ],
+          "pixels": 23,
+          "inside_pixels": 23,
+          "coverage": 1.0,
+          "width_cm": 1.0590391772741816,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.058933836933099,
+          "fill": 0.92,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 51,
+          "bbox": [
+            1232,
+            314,
+            4,
+            5
+          ],
+          "pixels": 18,
+          "inside_pixels": 18,
+          "coverage": 1.0,
+          "width_cm": 0.8472313418193452,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.058933836933099,
+          "fill": 0.9,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 13,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 63,
+          "bbox": [
+            1212,
+            360,
+            11,
+            11
+          ],
+          "pixels": 56,
+          "inside_pixels": 56,
+          "coverage": 1.0,
+          "width_cm": 2.3298861900031995,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.3296544412528175,
+          "fill": 0.4628099173553719,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 56,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 65,
+          "bbox": [
+            1211,
+            384,
+            56,
+            5
+          ],
+          "pixels": 152,
+          "inside_pixels": 152,
+          "coverage": 1.0,
+          "width_cm": 11.861238785470833,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.058933836933099,
+          "fill": 0.5428571428571428,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 141,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1211,
+            412,
+            7,
+            56
+          ],
+          "pixels": 184,
+          "inside_pixels": 184,
+          "coverage": 1.0,
+          "width_cm": 1.4826548481838542,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.860058973650705,
+          "fill": 0.46938775510204084,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 174,
+          "need": 9,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1253,
+            523,
+            14,
+            5
+          ],
+          "pixels": 27,
+          "inside_pixels": 27,
+          "coverage": 1.0,
+          "width_cm": 2.9653096963677084,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.058933836933099,
+          "fill": 0.38571428571428573,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        31
+      ],
+      "distance_m": 1.9269245365522343,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 18,
+        "bbox": [
+          919,
+          139,
+          361,
+          581
+        ],
+        "coverage": 0.526811734991257,
+        "bottom_cm": -15.668811589200338,
+        "top_cm": 109.36188338161239,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 23,
+        "bbox": [
+          1133,
+          156,
+          10,
+          4
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 104.27142717849895,
+        "top_cm": 105.09999035692323,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 26,
+        "bbox": [
+          1111,
+          207,
+          8,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 93.75731560929647,
+        "top_cm": 94.80803704316475,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 29,
+        "bbox": [
+          1022,
+          216,
+          12,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 93.3363637629775,
+        "top_cm": 93.99378553800403,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 31,
+        "bbox": [
+          1023,
+          225,
+          125,
+          109
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 68.00606234690024,
+        "top_cm": 91.35261764827044,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 1.673277650685101,
+        "ownership_score_m": 0.01673277650685101
+      },
+      {
+        "component": 36,
+        "bbox": [
+          1166,
+          266,
+          69,
+          18
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 78.15688872900864,
+        "top_cm": 81.81178727781536,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 8.172550725596645,
+        "ownership_score_m": 0.08172550725596645
+      },
+      {
+        "component": 38,
+        "bbox": [
+          1016,
+          269,
+          7,
+          2
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 81.97697724740213,
+        "top_cm": 82.4188628917511,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 42,
+        "bbox": [
+          969,
+          273,
+          22,
+          24
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 76.39873735253845,
+        "top_cm": 81.81221227643664,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.293262538050904,
+        "ownership_score_m": 0.07293262538050904
+      },
+      {
+        "component": 43,
+        "bbox": [
+          1153,
+          272,
+          4,
+          4
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 80.03882235009466,
+        "top_cm": 80.8679157668297,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.585453291632485,
+        "ownership_score_m": 0.09585453291632484
+      },
+      {
+        "component": 49,
+        "bbox": [
+          1239,
+          306,
+          5,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 72.57198204826753,
+        "top_cm": 73.57119955493567,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.500391246665934,
+        "ownership_score_m": 0.09500391246665935
+      },
+      {
+        "component": 51,
+        "bbox": [
+          1232,
+          314,
+          4,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 70.98408042917525,
+        "top_cm": 71.98718631871893,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 63,
+        "bbox": [
+          1212,
+          360,
+          11,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 60.479311723779304,
+        "top_cm": 62.71015023570884,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 65,
+        "bbox": [
+          1211,
+          384,
+          56,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 56.92710935138564,
+        "top_cm": 57.93291525957828,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1211,
+          412,
+          7,
+          56
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 40.695710287635166,
+        "top_cm": 52.12832719845415,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1253,
+          523,
+          14,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 29.183137185751185,
+        "top_cm": 30.189325797187887,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 6,
+    "pitch_delta": -0.5,
+    "result": "2",
+    "method": "RGB接缝仲裁",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 101,
+      "checks": [
+        {
+          "id": 50,
+          "bbox": [
+            652,
+            314,
+            10,
+            14
+          ],
+          "pixels": 67,
+          "inside_pixels": 67,
+          "coverage": 1.0,
+          "width_cm": 4.60524458474466,
+          "width_limit_cm": 36.12693489371926,
+          "height_cm": 6.446701115408393,
+          "fill": 0.4785714285714286,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 33,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 69,
+          "bbox": [
+            714,
+            418,
+            21,
+            7
+          ],
+          "pixels": 78,
+          "inside_pixels": 78,
+          "coverage": 1.0,
+          "width_cm": 9.671013627963786,
+          "width_limit_cm": 36.12693489371926,
+          "height_cm": 3.2233505577041965,
+          "fill": 0.5306122448979592,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.1896272477894145,
+      "pitch_deg": -2.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 50,
+        "bbox": [
+          652,
+          314,
+          10,
+          14
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 71.3274583263025,
+        "top_cm": 77.73570648900477,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.7958759186488695,
+        "ownership_score_m": 0.0679587591864887
+      },
+      {
+        "component": 69,
+        "bbox": [
+          714,
+          418,
+          21,
+          7
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 26.731561900441935,
+        "top_cm": 29.963452792658003,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 5,
+    "pitch_delta": 0,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 101,
+      "checks": [
+        {
+          "id": 18,
+          "bbox": [
+            919,
+            139,
+            361,
+            581
+          ],
+          "pixels": 10294,
+          "inside_pixels": 5174,
+          "coverage": 0.50262288711871,
+          "width_cm": 76.37620212009814,
+          "width_limit_cm": 40.0,
+          "height_cm": 122.90902933168408,
+          "fill": 0.04907957909993754,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.8316682382716353,
+          "red_pixels": 8142,
+          "blue_pixels": 395,
+          "need": 514,
+          "suspected": false
+        },
+        {
+          "id": 23,
+          "bbox": [
+            1133,
+            156,
+            10,
+            4
+          ],
+          "pixels": 25,
+          "inside_pixels": 22,
+          "coverage": 0.88,
+          "width_cm": 2.115684269254796,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.846189530682851,
+          "fill": 0.625,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 15,
+          "blue_pixels": 1,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 26,
+          "bbox": [
+            1111,
+            207,
+            8,
+            5
+          ],
+          "pixels": 26,
+          "inside_pixels": 26,
+          "coverage": 1.0,
+          "width_cm": 1.692547415403837,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0577369133535637,
+          "fill": 0.65,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 29,
+          "bbox": [
+            1022,
+            216,
+            12,
+            3
+          ],
+          "pixels": 19,
+          "inside_pixels": 19,
+          "coverage": 1.0,
+          "width_cm": 2.5388211231057554,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.6346421480121383,
+          "fill": 0.5277777777777778,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 12,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 31,
+          "bbox": [
+            1023,
+            225,
+            125,
+            109
+          ],
+          "pixels": 11321,
+          "inside_pixels": 11321,
+          "coverage": 1.0,
+          "width_cm": 26.446053365684953,
+          "width_limit_cm": 40.0,
+          "height_cm": 23.05866471110769,
+          "fill": 0.8308990825688073,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 6089,
+          "blue_pixels": 3904,
+          "need": 566,
+          "suspected": true,
+          "suspected_bottom_cm": 69.71732076339339,
+          "suspected_top_cm": 93.08687470217154,
+          "bottom_cm": 69.71732076339339,
+          "top_cm": 93.08687470217154,
+          "bottom_error_cm": -0.2826792366066089,
+          "top_error_cm": 3.086874702171538,
+          "horizontal_overlap": 0.991869918699187,
+          "vertical_gap_px": 23.0,
+          "result": "红"
+        },
+        {
+          "id": 36,
+          "bbox": [
+            1166,
+            266,
+            69,
+            18
+          ],
+          "pixels": 985,
+          "inside_pixels": 985,
+          "coverage": 1.0,
+          "width_cm": 14.598221457858093,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.807852888072829,
+          "fill": 0.7930756843800322,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 369,
+          "blue_pixels": 3,
+          "need": 49,
+          "suspected": false
+        },
+        {
+          "id": 38,
+          "bbox": [
+            1016,
+            269,
+            7,
+            2
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.4809789884783575,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.4230947653414255,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 42,
+          "bbox": [
+            969,
+            273,
+            22,
+            24
+          ],
+          "pixels": 115,
+          "inside_pixels": 115,
+          "coverage": 1.0,
+          "width_cm": 4.6545053923605515,
+          "width_limit_cm": 40.0,
+          "height_cm": 5.077137184097106,
+          "fill": 0.2178030303030303,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 82,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 43,
+          "bbox": [
+            1153,
+            272,
+            4,
+            4
+          ],
+          "pixels": 12,
+          "inside_pixels": 12,
+          "coverage": 1.0,
+          "width_cm": 0.8462737077019185,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.846189530682851,
+          "fill": 0.75,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 12,
+          "blue_pixels": 0,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 49,
+          "bbox": [
+            1239,
+            306,
+            5,
+            5
+          ],
+          "pixels": 23,
+          "inside_pixels": 23,
+          "coverage": 1.0,
+          "width_cm": 1.057842134627398,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0577369133535637,
+          "fill": 0.92,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 51,
+          "bbox": [
+            1232,
+            314,
+            4,
+            5
+          ],
+          "pixels": 18,
+          "inside_pixels": 18,
+          "coverage": 1.0,
+          "width_cm": 0.8462737077019185,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0577369133535637,
+          "fill": 0.9,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 13,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 63,
+          "bbox": [
+            1212,
+            360,
+            11,
+            11
+          ],
+          "pixels": 56,
+          "inside_pixels": 56,
+          "coverage": 1.0,
+          "width_cm": 2.3272526961802757,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.32702120937784,
+          "fill": 0.4628099173553719,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 56,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 65,
+          "bbox": [
+            1211,
+            384,
+            56,
+            5
+          ],
+          "pixels": 152,
+          "inside_pixels": 152,
+          "coverage": 1.0,
+          "width_cm": 11.84783190782686,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0577369133535637,
+          "fill": 0.5428571428571428,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 141,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1211,
+            412,
+            7,
+            56
+          ],
+          "pixels": 184,
+          "inside_pixels": 184,
+          "coverage": 1.0,
+          "width_cm": 1.4809789884783575,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.846653429559915,
+          "fill": 0.46938775510204084,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 174,
+          "need": 9,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1253,
+            523,
+            14,
+            5
+          ],
+          "pixels": 27,
+          "inside_pixels": 27,
+          "coverage": 1.0,
+          "width_cm": 2.961957976956715,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0577369133535637,
+          "fill": 0.38571428571428573,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        31
+      ],
+      "distance_m": 1.924746514344101,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 18,
+        "bbox": [
+          919,
+          139,
+          361,
+          581
+        ],
+        "coverage": 0.50262288711871,
+        "bottom_cm": -13.739295091120763,
+        "top_cm": 111.12868301254963,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 23,
+        "bbox": [
+          1133,
+          156,
+          10,
+          4
+        ],
+        "coverage": 0.88,
+        "bottom_cm": 105.99326972452205,
+        "top_cm": 106.82410430464604,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 26,
+        "bbox": [
+          1111,
+          207,
+          8,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 95.47248443634295,
+        "top_cm": 96.52531784544333,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 29,
+        "bbox": [
+          1022,
+          216,
+          12,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 95.12234276377033,
+        "top_cm": 95.78105173497246,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 31,
+        "bbox": [
+          1023,
+          225,
+          125,
+          109
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 69.71732076339339,
+        "top_cm": 93.08687470217154,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 1.6847769693890735,
+        "ownership_score_m": 0.016847769693890735
+      },
+      {
+        "component": 36,
+        "bbox": [
+          1166,
+          266,
+          69,
+          18
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 79.78475430838395,
+        "top_cm": 83.44337043233985,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 8.170691938022056,
+        "ownership_score_m": 0.08170691938022057
+      },
+      {
+        "component": 38,
+        "bbox": [
+          1016,
+          269,
+          7,
+          2
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 83.7528314858377,
+        "top_cm": 84.19522720323369,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 42,
+        "bbox": [
+          969,
+          273,
+          22,
+          24
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 78.20426939246924,
+        "top_cm": 83.62279898339457,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.290735204537335,
+        "ownership_score_m": 0.07290735204537335
+      },
+      {
+        "component": 43,
+        "bbox": [
+          1153,
+          272,
+          4,
+          4
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 81.70245111157553,
+        "top_cm": 82.53241158213591,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 49,
+        "bbox": [
+          1239,
+          306,
+          5,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 74.16651112434414,
+        "top_cm": 75.16626561607531,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.500122754134416,
+        "ownership_score_m": 0.09500122754134416
+      },
+      {
+        "component": 51,
+        "bbox": [
+          1232,
+          314,
+          4,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 72.58320951795413,
+        "top_cm": 73.58674264253301,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.498233437710562,
+        "ownership_score_m": 0.09498233437710563
+      },
+      {
+        "component": 63,
+        "bbox": [
+          1212,
+          360,
+          11,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 62.090011487377886,
+        "top_cm": 64.32025571704185,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 65,
+        "bbox": [
+          1211,
+          384,
+          56,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 58.52409500802174,
+        "top_cm": 59.52934248988356,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1211,
+          412,
+          7,
+          56
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 42.329045189323736,
+        "top_cm": 53.746505717424476,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1253,
+          523,
+          14,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 30.808540142707784,
+        "top_cm": 31.81222675383867,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 6,
+    "pitch_delta": 0,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 101,
+      "checks": [
+        {
+          "id": 50,
+          "bbox": [
+            652,
+            314,
+            10,
+            14
+          ],
+          "pixels": 67,
+          "inside_pixels": 67,
+          "coverage": 1.0,
+          "width_cm": 4.603703427923786,
+          "width_limit_cm": 36.08564850631463,
+          "height_cm": 6.444543710472929,
+          "fill": 0.4785714285714286,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 33,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 69,
+          "bbox": [
+            714,
+            418,
+            21,
+            7
+          ],
+          "pixels": 78,
+          "inside_pixels": 78,
+          "coverage": 1.0,
+          "width_cm": 9.66777719863995,
+          "width_limit_cm": 36.08564850631463,
+          "height_cm": 3.2222718552364644,
+          "fill": 0.5306122448979592,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.18822517836812,
+      "pitch_deg": -2.0,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 50,
+        "bbox": [
+          652,
+          314,
+          10,
+          14
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 74.9747629680956,
+        "top_cm": 81.38538177809461,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.794690595000496,
+        "ownership_score_m": 0.06794690595000497
+      },
+      {
+        "component": 69,
+        "bbox": [
+          714,
+          418,
+          21,
+          7
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 30.406165172688276,
+        "top_cm": 33.63302610691265,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 5,
+    "pitch_delta": 0.5,
+    "result": "红",
+    "method": "RGB顶块",
+    "reason": null,
+    "cap": {
+      "candidates": 1,
+      "components": 101,
+      "checks": [
+        {
+          "id": 18,
+          "bbox": [
+            919,
+            139,
+            361,
+            581
+          ],
+          "pixels": 10294,
+          "inside_pixels": 4610,
+          "coverage": 0.44783368952788033,
+          "width_cm": 76.28395929750643,
+          "width_limit_cm": 40.0,
+          "height_cm": 122.76058681329683,
+          "fill": 0.04907957909993754,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 0.8332806326258602,
+          "red_pixels": 8142,
+          "blue_pixels": 395,
+          "need": 514,
+          "suspected": false
+        },
+        {
+          "id": 26,
+          "bbox": [
+            1111,
+            207,
+            8,
+            5
+          ],
+          "pixels": 26,
+          "inside_pixels": 26,
+          "coverage": 1.0,
+          "width_cm": 1.6905032531303363,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0564594390128814,
+          "fill": 0.65,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 29,
+          "bbox": [
+            1022,
+            216,
+            12,
+            3
+          ],
+          "pixels": 19,
+          "inside_pixels": 19,
+          "coverage": 1.0,
+          "width_cm": 2.5357548796955047,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.6338756634077289,
+          "fill": 0.5277777777777778,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 12,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 31,
+          "bbox": [
+            1023,
+            225,
+            125,
+            109
+          ],
+          "pixels": 11321,
+          "inside_pixels": 11321,
+          "coverage": 1.0,
+          "width_cm": 26.414113330161506,
+          "width_limit_cm": 40.0,
+          "height_cm": 23.030815770480817,
+          "fill": 0.8308990825688073,
+          "failures": [],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 6089,
+          "blue_pixels": 3904,
+          "need": 566,
+          "suspected": true,
+          "suspected_bottom_cm": 71.42880784097063,
+          "suspected_top_cm": 94.8238150645205,
+          "bottom_cm": 71.42880784097063,
+          "top_cm": 94.8238150645205,
+          "bottom_error_cm": 1.4288078409706362,
+          "top_error_cm": 4.823815064520498,
+          "horizontal_overlap": 0.991869918699187,
+          "vertical_gap_px": 23.0,
+          "result": "红"
+        },
+        {
+          "id": 36,
+          "bbox": [
+            1166,
+            266,
+            69,
+            18
+          ],
+          "pixels": 985,
+          "inside_pixels": 985,
+          "coverage": 1.0,
+          "width_cm": 14.58059055824915,
+          "width_limit_cm": 40.0,
+          "height_cm": 3.8032539804463736,
+          "fill": 0.7930756843800322,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 369,
+          "blue_pixels": 3,
+          "need": 49,
+          "suspected": false
+        },
+        {
+          "id": 38,
+          "bbox": [
+            1016,
+            269,
+            7,
+            2
+          ],
+          "pixels": 14,
+          "inside_pixels": 14,
+          "coverage": 1.0,
+          "width_cm": 1.4791903464890443,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.42258377560515265,
+          "fill": 1.0,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 42,
+          "bbox": [
+            969,
+            273,
+            22,
+            24
+          ],
+          "pixels": 115,
+          "inside_pixels": 115,
+          "coverage": 1.0,
+          "width_cm": 4.648883946108425,
+          "width_limit_cm": 40.0,
+          "height_cm": 5.0710053072618315,
+          "fill": 0.2178030303030303,
+          "failures": [
+            "填充率不足30%",
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 82,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 43,
+          "bbox": [
+            1153,
+            272,
+            4,
+            4
+          ],
+          "pixels": 12,
+          "inside_pixels": 12,
+          "coverage": 1.0,
+          "width_cm": 0.8452516265651682,
+          "width_limit_cm": 40.0,
+          "height_cm": 0.8451675512103053,
+          "fill": 0.75,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 12,
+          "blue_pixels": 0,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 49,
+          "bbox": [
+            1239,
+            306,
+            5,
+            5
+          ],
+          "pixels": 23,
+          "inside_pixels": 23,
+          "coverage": 1.0,
+          "width_cm": 1.0565645332064602,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0564594390128814,
+          "fill": 0.92,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 19,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 51,
+          "bbox": [
+            1232,
+            314,
+            4,
+            5
+          ],
+          "pixels": 18,
+          "inside_pixels": 18,
+          "coverage": 1.0,
+          "width_cm": 0.8452516265651682,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0564594390128814,
+          "fill": 0.9,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 13,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 63,
+          "bbox": [
+            1212,
+            360,
+            11,
+            11
+          ],
+          "pixels": 56,
+          "inside_pixels": 56,
+          "coverage": 1.0,
+          "width_cm": 2.3244419730542125,
+          "width_limit_cm": 40.0,
+          "height_cm": 2.3242107658283393,
+          "fill": 0.4628099173553719,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 56,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 65,
+          "bbox": [
+            1211,
+            384,
+            56,
+            5
+          ],
+          "pixels": 152,
+          "inside_pixels": 152,
+          "coverage": 1.0,
+          "width_cm": 11.833522771912355,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0564594390128814,
+          "fill": 0.5428571428571428,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 141,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 68,
+          "bbox": [
+            1211,
+            412,
+            7,
+            56
+          ],
+          "pixels": 184,
+          "inside_pixels": 184,
+          "coverage": 1.0,
+          "width_cm": 1.4791903464890443,
+          "width_limit_cm": 40.0,
+          "height_cm": 11.832345716944275,
+          "fill": 0.46938775510204084,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 174,
+          "need": 9,
+          "suspected": false
+        },
+        {
+          "id": 86,
+          "bbox": [
+            1253,
+            523,
+            14,
+            5
+          ],
+          "pixels": 27,
+          "inside_pixels": 27,
+          "coverage": 1.0,
+          "width_cm": 2.9583806929780887,
+          "width_limit_cm": 40.0,
+          "height_cm": 1.0564594390128814,
+          "fill": 0.38571428571428573,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "confirmed",
+      "suspected_components": [
+        31
+      ],
+      "distance_m": 1.9224219152369408,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "唯一候选通过"
+    },
+    "ownership": [
+      {
+        "component": 18,
+        "bbox": [
+          919,
+          139,
+          361,
+          581
+        ],
+        "coverage": 0.44783368952788033,
+        "bottom_cm": -11.819318991295702,
+        "top_cm": 112.9001448254987,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 26,
+        "bbox": [
+          1111,
+          207,
+          8,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 97.19052673419853,
+        "top_cm": 98.24558473983356,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 29,
+        "bbox": [
+          1022,
+          216,
+          12,
+          3
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 96.9113650788607,
+        "top_cm": 97.57143647513264,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 31,
+        "bbox": [
+          1023,
+          225,
+          125,
+          109
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 71.42880784097063,
+        "top_cm": 94.8238150645205,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 3.126311452745567,
+        "ownership_score_m": 0.03126311452745567
+      },
+      {
+        "component": 36,
+        "bbox": [
+          1166,
+          266,
+          69,
+          18
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 81.4137778377183,
+        "top_cm": 85.07646088778237,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 8.168658474967966,
+        "ownership_score_m": 0.08168658474967966
+      },
+      {
+        "component": 38,
+        "bbox": [
+          1016,
+          269,
+          7,
+          2
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 85.53046796788549,
+        "top_cm": 85.97342290864674,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 42,
+        "bbox": [
+          969,
+          273,
+          22,
+          24
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 80.01101014704955,
+        "top_cm": 85.4352124610276,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 7.287898843010976,
+        "ownership_score_m": 0.07287898843010976
+      },
+      {
+        "component": 43,
+        "bbox": [
+          1153,
+          272,
+          4,
+          4
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 83.3674710887527,
+        "top_cm": 84.1983808982137,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "单色区域没有贴近本塔白盒顶"
+      },
+      {
+        "component": 49,
+        "bbox": [
+          1239,
+          306,
+          5,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 75.76164597034195,
+        "top_cm": 76.76202862635625,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.499808671992843,
+        "ownership_score_m": 0.09499808671992843
+      },
+      {
+        "component": 51,
+        "bbox": [
+          1232,
+          314,
+          4,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 74.18280303315996,
+        "top_cm": 75.18685529890615,
+        "owner": "最近右侧地面",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 9.497973867126907,
+        "ownership_score_m": 0.09497973867126908
+      },
+      {
+        "component": 63,
+        "bbox": [
+          1212,
+          360,
+          11,
+          11
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 63.70021070668024,
+        "top_cm": 65.93006709058218,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 65,
+        "bbox": [
+          1211,
+          384,
+          56,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 60.120263799931294,
+        "top_cm": 61.12504460181195,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 68,
+        "bbox": [
+          1211,
+          412,
+          7,
+          56
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 43.96001254130903,
+        "top_cm": 55.363404199785585,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      },
+      {
+        "component": 86,
+        "bbox": [
+          1253,
+          523,
+          14,
+          5
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 32.43055628368095,
+        "top_cm": 33.43183954829004,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  },
+  {
+    "second": 120,
+    "no": 6,
+    "pitch_delta": 0.5,
+    "result": "2",
+    "method": "RGB局部盒面",
+    "reason": null,
+    "cap": {
+      "candidates": 0,
+      "components": 101,
+      "checks": [
+        {
+          "id": 50,
+          "bbox": [
+            652,
+            314,
+            10,
+            14
+          ],
+          "pixels": 67,
+          "inside_pixels": 67,
+          "coverage": 1.0,
+          "width_cm": 4.601811681262912,
+          "width_limit_cm": 36.0443568210817,
+          "height_cm": 6.441895528582846,
+          "fill": 0.4785714285714286,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 33,
+          "need": 8,
+          "suspected": false
+        },
+        {
+          "id": 69,
+          "bbox": [
+            714,
+            418,
+            21,
+            7
+          ],
+          "pixels": 78,
+          "inside_pixels": 78,
+          "coverage": 1.0,
+          "width_cm": 9.663804530652117,
+          "width_limit_cm": 36.0443568210817,
+          "height_cm": 3.220947764291423,
+          "fill": 0.5306122448979592,
+          "failures": [
+            "红或蓝面积不足（可能单色/断开）"
+          ],
+          "side_visible_fraction": 1.0,
+          "red_pixels": 0,
+          "blue_pixels": 14,
+          "need": 8,
+          "suspected": false
+        }
+      ],
+      "state": "absent",
+      "suspected_components": [],
+      "distance_m": 4.18650415938412,
+      "pitch_deg": -1.5,
+      "roll_deg": 0.0,
+      "yaw_deg": -25.700000000000003,
+      "expected_bottom_cm": 70.0,
+      "expected_top_cm": 90.0,
+      "close_radius_px": 3,
+      "reason": "没有合格候选"
+    },
+    "ownership": [
+      {
+        "component": 50,
+        "bbox": [
+          652,
+          314,
+          10,
+          14
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 78.62320589755412,
+        "top_cm": 85.03717324834822,
+        "owner": "右侧地面远一格",
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "唯一归属",
+        "height_error_cm": 6.793016324602946,
+        "ownership_score_m": 0.06793016324602946
+      },
+      {
+        "component": 69,
+        "bbox": [
+          714,
+          418,
+          21,
+          7
+        ],
+        "coverage": 1.0,
+        "bottom_cm": 34.075085489953615,
+        "top_cm": 37.29741759430688,
+        "owner": null,
+        "source": "rgb",
+        "depth_status": "missing_or_incoherent",
+        "reason": "顶块位置与塔位不匹配"
+      }
+    ]
+  }
+]
