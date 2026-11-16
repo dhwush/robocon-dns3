@@ -272,8 +272,8 @@ def test_near_platform_stays_readable_when_the_base_drops_out():
     cols = np.nonzero(white[top])[0]
     color[max(0, top - 30) : top, int(cols.min()) : int(cols.max())] = (0, 0, 255)
     capped = inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name]
-    assert capped.conclusion == "红"
-    assert capped.method == "彩色"
+    # 单色条不参与顶块判断，也不否决已经识别出的两层白盒。
+    assert capped.conclusion == "2"
     blank = inspect_frame(pose, offset, 0.0, INTR, _blank(), None)
     assert blank[cell.name].conclusion is None
     assert blank["第三行左侧"].in_view and blank["右侧地面远一格"].in_view
@@ -292,14 +292,14 @@ def test_peeking_two_layers_is_not_called_one():
     assert views[cell.name].conclusion == "2"
 
 
-def test_red_cap_uses_the_upper_side():
+def test_single_red_side_does_not_block_white_layers():
     _, pose, offset = _basic()
     cell = _cell("右侧地面远一格")
     color = _blank()
     _paint(color, pose, 0.0, cell, 0.35, 0.70, 0.0, (255, 255, 255), offset=offset)
     _paint(color, pose, 0.0, cell, 0.20, 0.20, 0.70, (0, 0, 255), offset=offset)
     views = inspect_frame(pose, offset, 0.0, INTR, color, None)
-    assert views[cell.name].conclusion == "红"
+    assert views[cell.name].conclusion == "2"
 
 
 def test_upper_band_is_the_faction_and_a_tie_stays_unknown():
@@ -336,13 +336,16 @@ def _paint_separated_red(color, pose, offset, pitch, cell, z_top):
     color[max(0, top - cap_px) : max(0, top - cap_px // 2), int(cols.min()) : int(cols.max())] = (0, 0, 255)
 
 
-def test_color_separated_from_the_white_is_not_a_cap():
+def test_single_color_separated_at_cap_height_does_not_block_white():
     _, pose, offset = _basic()
     cell = _cell("右侧地面远一格")
     color = _blank()
     _paint(color, pose, 0.0, cell, 0.35, 0.70, 0.0, (255, 255, 255), offset=offset)
     _paint_separated_red(color, pose, offset, 0.0, cell, 0.70)
-    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "2"
+    view = inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name]
+    assert view.conclusion == "2"
+    assert view.measurements["rgb_cap"]["state"] == "absent"
+    assert not view.measurements.get("cap_blocks_white")
 
 
 def _shift_white(color, du, dv):
@@ -555,7 +558,7 @@ def test_box_in_front_of_the_tower_is_not_a_layer():
     assert "前面有东西挡住了" in "\n".join(watch.window_lines("extend"))
 
 
-def test_depth_outside_range_does_not_cancel_color():
+def test_missing_depth_allows_color_but_measured_foreground_blocks_it():
     _, pose, offset = _basic()
     cell = _cell("右侧地面远一格")
     color = _blank()
@@ -565,8 +568,9 @@ def test_depth_outside_range_does_not_cancel_color():
     assert views[cell.name].conclusion == "1"
     depth[:] = 1.0
     views = inspect_frame(pose, offset, 0.0, INTR, color, depth)
-    assert views[cell.name].conclusion == "1"
-    assert views[cell.name].method == "彩色"
+    assert views[cell.name].conclusion is None
+    assert views[cell.name].needs_parallax
+    assert "前景遮挡" in views[cell.name].reason
 
 
 def test_close_face_uses_depth_and_names_it():
@@ -623,7 +627,7 @@ def test_missing_top_depth_on_a_near_two_layer_still_counts():
     assert one.conclusion == "1"
 
 
-def test_jagged_face_still_uses_depth_when_the_top_matches():
+def test_jagged_face_uses_local_rgb_and_depth_when_the_top_matches():
     # 两层白盒整块在画面里，轮廓和木板粘成锯齿。深度对上 70 cm 就写两层。
     import cv2
 
@@ -640,7 +644,10 @@ def test_jagged_face_still_uses_depth_when_the_top_matches():
     for index, x in enumerate(range(x0, x1, max(1, (x1 - x0) // 8))):
         reach = 36 if index % 2 == 0 else 18
         cv2.line(color, (x, y0), (x, max(0, y0 - reach)), (255, 255, 255), 2)
-    assert inspect_frame(pose, OFFSET, pitch, INTR, color, None)[cell.name].conclusion is None
+    # 顶边和局部盒面仍可靠，背景粘出的细毛刺不再否决单帧RGB识别。
+    rgb = inspect_frame(pose, OFFSET, pitch, INTR, color, None)[cell.name]
+    assert rgb.conclusion == '2'
+    assert rgb.method == 'RGB局部盒面'
     view = inspect_frame(pose, OFFSET, pitch, INTR, color, depth)[cell.name]
     assert view.conclusion == "2"
     assert view.method == "深度"
@@ -658,7 +665,7 @@ def test_cut_off_top_stays_unknown():
     assert view.method is None
 
 
-def test_depth_sees_the_cap_color():
+def test_depth_and_single_color_side_keep_white_layers():
     cell = _cell("最近右侧地面")
     pose = _pose_for_camera(cell.x, cell.y - 0.8, 0.0, OFFSET)
     pitch = -15.0
@@ -671,8 +678,8 @@ def test_depth_sees_the_cap_color():
     cols = np.nonzero(white[top])[0]
     color[max(0, top - 30) : top, int(cols.min()) : int(cols.max())] = (0, 0, 255)
     view = inspect_frame(pose, OFFSET, pitch, INTR, color, depth)[cell.name]
-    assert view.conclusion == "红"
-    assert view.method == "深度"
+    assert view.conclusion == "2"
+    assert not view.measurements.get("cap_blocks_white")
 
 
 def test_depth_ignores_color_separated_from_the_white():
@@ -722,7 +729,8 @@ def test_narrow_white_stays_unknown_and_does_not_keep_a_wrong_empty():
     gap = max(3, width // 20)
     for center in (x0 + width // 3, x0 + 2 * width // 3):
         color[y0 : y0 + height, center - gap // 2 : center + gap // 2 + 1] = 0
-    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion is None
+    # 两条窄遮挡只占约10%，真实盒顶与局部盒面仍支持一层。
+    assert inspect_frame(pose, offset, 0.0, INTR, color, None)[cell.name].conclusion == "1"
     watch = FieldWatch(setup, INTR)
     for _ in range(LOCK_FRAMES + 5):
         watch.update(pose, _blank())

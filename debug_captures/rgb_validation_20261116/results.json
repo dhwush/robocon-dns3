@@ -1,0 +1,2728 @@
+[
+  {
+    "time_s": 29,
+    "depth": null,
+    "roll_assumed": 0,
+    "pose": [
+      -0.01,
+      0.021,
+      -0.5,
+      -1
+    ],
+    "targets": {
+      "3": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": -1.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 53,
+            "checks": [
+              {
+                "id": 16,
+                "bbox": [
+                  395,
+                  473,
+                  41,
+                  41
+                ],
+                "pixels": 338,
+                "inside_pixels": 98,
+                "coverage": 0.28994082840236685,
+                "width_cm": 17.008139348532676,
+                "width_limit_cm": 37.34623278414378,
+                "height_cm": 17.006447585622855,
+                "fill": 0.20107079119571683,
+                "failures": [
+                  "填充率不足45%",
+                  "格内覆盖不足90%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 164,
+                "need": 33,
+                "suspected": false
+              },
+              {
+                "id": 17,
+                "bbox": [
+                  388,
+                  474,
+                  19,
+                  10
+                ],
+                "pixels": 103,
+                "inside_pixels": 103,
+                "coverage": 1.0,
+                "width_cm": 7.881820673710265,
+                "width_limit_cm": 37.34623278414378,
+                "height_cm": 4.147914045273867,
+                "fill": 0.5421052631578948,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 30,
+                "need": 10,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 3.7739455811972573,
+            "pitch_deg": -1.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -0.5,
+            "expected_bottom_cm": 90.0,
+            "expected_top_cm": 110.00000000000001,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 48.98836578756423,
+                "line": [
+                  342,
+                  405,
+                  400,
+                  405
+                ],
+                "fill": 1.0,
+                "edge_support": 0.8679245283018868,
+                "sides": 1,
+                "side_columns": [
+                  342,
+                  397
+                ],
+                "complete_sides": false
+              },
+              {
+                "state": "1",
+                "top_cm": 48.49302511478275,
+                "line": [
+                  367,
+                  409,
+                  406,
+                  403
+                ],
+                "fill": 1.0,
+                "edge_support": 0.8235294117647058,
+                "sides": 1
+              }
+            ],
+            "candidates": 1,
+            "state": "1"
+          },
+          "far_support": {
+            "reason": "远处粘连：缺少可核验白盒归属的深度"
+          },
+          "far_white": {
+            "reason": "白盒与背景未分离：缺少深度，需要侧向视角"
+          },
+          "rgb_white_edges": {
+            "candidates": 0,
+            "reason": "没有唯一且四边、顶底高度完整的RGB盒面"
+          },
+          "needs_parallax": true,
+          "white_candidates": [],
+          "reason": "深度不足：没有有效白点云",
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "尺寸不符：白块宽度不足15厘米"
+          },
+          "white_piece": [
+            [
+              [
+                342,
+                405
+              ]
+            ],
+            [
+              [
+                397,
+                405
+              ]
+            ],
+            [
+              [
+                397,
+                433
+              ]
+            ],
+            [
+              [
+                342,
+                433
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  },
+  {
+    "time_s": 133,
+    "depth": null,
+    "roll_assumed": 0,
+    "pose": [
+      -0.248,
+      0.191,
+      -46.9,
+      -1
+    ],
+    "targets": {
+      "4": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": -1.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 107,
+            "checks": [
+              {
+                "id": 10,
+                "bbox": [
+                  807,
+                  266,
+                  5,
+                  16
+                ],
+                "pixels": 29,
+                "inside_pixels": 29,
+                "coverage": 1.0,
+                "width_cm": 1.0229145533365676,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 3.273000979948335,
+                "fill": 0.3625,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 29,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 13,
+                "bbox": [
+                  806,
+                  291,
+                  3,
+                  6
+                ],
+                "pixels": 18,
+                "inside_pixels": 18,
+                "coverage": 1.0,
+                "width_cm": 0.6137487320019405,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 1.2273753674806256,
+                "fill": 1.0,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 18,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 15,
+                "bbox": [
+                  584,
+                  316,
+                  7,
+                  7
+                ],
+                "pixels": 34,
+                "inside_pixels": 34,
+                "coverage": 1.0,
+                "width_cm": 1.4320803746711943,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 1.4319379287273966,
+                "fill": 0.6938775510204082,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 28,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 22,
+                "bbox": [
+                  924,
+                  363,
+                  3,
+                  7
+                ],
+                "pixels": 14,
+                "inside_pixels": 14,
+                "coverage": 1.0,
+                "width_cm": 0.6137487320019405,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 1.4319379287273966,
+                "fill": 0.6666666666666666,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 14,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 23,
+                "bbox": [
+                  600,
+                  369,
+                  3,
+                  25
+                ],
+                "pixels": 35,
+                "inside_pixels": 35,
+                "coverage": 1.0,
+                "width_cm": 0.6137487320019405,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 5.114064031169273,
+                "fill": 0.4666666666666667,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 35,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 26,
+                "bbox": [
+                  560,
+                  386,
+                  8,
+                  8
+                ],
+                "pixels": 55,
+                "inside_pixels": 55,
+                "coverage": 1.0,
+                "width_cm": 1.6366632853385081,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 1.6365004899741675,
+                "fill": 0.859375,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 26,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 27,
+                "bbox": [
+                  957,
+                  392,
+                  9,
+                  62
+                ],
+                "pixels": 121,
+                "inside_pixels": 121,
+                "coverage": 1.0,
+                "width_cm": 1.8412461960058215,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 12.682878797299798,
+                "fill": 0.2168458781362007,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 99,
+                "need": 12,
+                "suspected": false
+              },
+              {
+                "id": 47,
+                "bbox": [
+                  802,
+                  429,
+                  13,
+                  4
+                ],
+                "pixels": 18,
+                "inside_pixels": 18,
+                "coverage": 1.0,
+                "width_cm": 2.6595778386750752,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 0.8182502449870838,
+                "fill": 0.34615384615384615,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 7,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 56,
+                "bbox": [
+                  941,
+                  450,
+                  5,
+                  6
+                ],
+                "pixels": 20,
+                "inside_pixels": 20,
+                "coverage": 1.0,
+                "width_cm": 1.0229145533365676,
+                "width_limit_cm": 37.84336991541694,
+                "height_cm": 1.2273753674806256,
+                "fill": 0.6666666666666666,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 20,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 1.8611956893737231,
+            "pitch_deg": -1.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 90.0,
+            "expected_top_cm": 110.00000000000001,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 52.32041353044673,
+                "line": [
+                  561,
+                  429,
+                  725,
+                  437
+                ],
+                "fill": 0.9664227292294447,
+                "edge_support": 0.9433962264150944,
+                "sides": 1,
+                "side_columns": [
+                  561,
+                  806
+                ],
+                "complete_sides": false
+              },
+              {
+                "state": "1",
+                "top_cm": 53.216920598996566,
+                "line": [
+                  562,
+                  435,
+                  686,
+                  422
+                ],
+                "fill": 0.9470588235294117,
+                "edge_support": 0.957983193277311,
+                "sides": 1,
+                "side_columns": [
+                  562,
+                  708
+                ],
+                "complete_sides": false
+              },
+              {
+                "state": "2",
+                "top_cm": 97.28657631912208,
+                "line": [
+                  736,
+                  201,
+                  924,
+                  224
+                ],
+                "fill": 0.9373578037312301,
+                "edge_support": 0.8688524590163934,
+                "sides": 2
+              },
+              {
+                "state": "2",
+                "top_cm": 84.6866732553829,
+                "line": [
+                  799,
+                  281,
+                  949,
+                  268
+                ],
+                "fill": 0.8386007563479201,
+                "edge_support": 0.8275862068965517,
+                "sides": 2
+              },
+              {
+                "state": "2",
+                "top_cm": 95.84093026028167,
+                "line": [
+                  808,
+                  228,
+                  962,
+                  209
+                ],
+                "fill": 0.872144436256448,
+                "edge_support": 0.9865771812080537,
+                "sides": 2
+              },
+              {
+                "state": "1",
+                "top_cm": 51.95552590047349,
+                "line": [
+                  572,
+                  433,
+                  672,
+                  436
+                ],
+                "fill": 1.0,
+                "edge_support": 0.7157894736842105,
+                "sides": 1
+              },
+              {
+                "state": "2",
+                "top_cm": 83.28603674912199,
+                "line": [
+                  799,
+                  288,
+                  948,
+                  275
+                ],
+                "fill": 0.833957720096334,
+                "edge_support": 0.8541666666666666,
+                "sides": 1
+              },
+              {
+                "state": "2",
+                "top_cm": 94.54910538228766,
+                "line": [
+                  804,
+                  231,
+                  915,
+                  220
+                ],
+                "fill": 0.8714710252600297,
+                "edge_support": 0.9528301886792453,
+                "sides": 2
+              },
+              {
+                "state": "2",
+                "top_cm": 95.69497388309809,
+                "line": [
+                  821,
+                  213,
+                  924,
+                  226
+                ],
+                "fill": 0.9004419027813881,
+                "edge_support": 0.9285714285714286,
+                "sides": 2
+              }
+            ],
+            "candidates": 2,
+            "state": "1"
+          },
+          "white_candidates": [],
+          "reason": "深度不足：没有有效白点云",
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "尺寸不符：白块宽度不足15厘米"
+          },
+          "white_piece": [
+            [
+              [
+                562,
+                435
+              ]
+            ],
+            [
+              [
+                708,
+                420
+              ]
+            ],
+            [
+              [
+                708,
+                478
+              ]
+            ],
+            [
+              [
+                562,
+                493
+              ]
+            ]
+          ]
+        }
+      },
+      "5": {
+        "result": null,
+        "reason": "RGB轮廓顶高不符：可能识别到背景白块",
+        "method": null,
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": -1.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 107,
+            "checks": [
+              {
+                "id": 7,
+                "bbox": [
+                  988,
+                  243,
+                  23,
+                  59
+                ],
+                "pixels": 540,
+                "inside_pixels": 506,
+                "coverage": 0.937037037037037,
+                "width_cm": 7.330960709232158,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 18.803637363010456,
+                "fill": 0.39793662490788506,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 358,
+                "need": 54,
+                "suspected": false
+              },
+              {
+                "id": 11,
+                "bbox": [
+                  1133,
+                  280,
+                  3,
+                  17
+                ],
+                "pixels": 37,
+                "inside_pixels": 37,
+                "coverage": 1.0,
+                "width_cm": 0.9562122664215859,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 5.417997206291148,
+                "fill": 0.7254901960784313,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 26,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 22,
+                "bbox": [
+                  924,
+                  363,
+                  3,
+                  7
+                ],
+                "pixels": 14,
+                "inside_pixels": 14,
+                "coverage": 1.0,
+                "width_cm": 0.9562122664215859,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 2.2309400261198844,
+                "fill": 0.6666666666666666,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 14,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 27,
+                "bbox": [
+                  957,
+                  392,
+                  9,
+                  62
+                ],
+                "pixels": 121,
+                "inside_pixels": 121,
+                "coverage": 1.0,
+                "width_cm": 2.8686367992647575,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 19.759754517061833,
+                "fill": 0.2168458781362007,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 99,
+                "need": 12,
+                "suspected": false
+              },
+              {
+                "id": 39,
+                "bbox": [
+                  1000,
+                  418,
+                  12,
+                  45
+                ],
+                "pixels": 213,
+                "inside_pixels": 213,
+                "coverage": 1.0,
+                "width_cm": 3.8248490656863434,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 14.341757310770687,
+                "fill": 0.39444444444444443,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 144,
+                "need": 21,
+                "suspected": false
+              },
+              {
+                "id": 55,
+                "bbox": [
+                  980,
+                  442,
+                  9,
+                  13
+                ],
+                "pixels": 67,
+                "inside_pixels": 67,
+                "coverage": 1.0,
+                "width_cm": 2.8686367992647575,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 4.143174334222643,
+                "fill": 0.5726495726495726,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 46,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 56,
+                "bbox": [
+                  941,
+                  450,
+                  5,
+                  6
+                ],
+                "pixels": 20,
+                "inside_pixels": 20,
+                "coverage": 1.0,
+                "width_cm": 1.5936871107026431,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 1.912234308102758,
+                "fill": 0.6666666666666666,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 20,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 63,
+                "bbox": [
+                  1024,
+                  458,
+                  10,
+                  4
+                ],
+                "pixels": 13,
+                "inside_pixels": 13,
+                "coverage": 1.0,
+                "width_cm": 3.1873742214052863,
+                "width_limit_cm": 39.77219722324162,
+                "height_cm": 1.2748228720685055,
+                "fill": 0.325,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 5,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 2.899717841509947,
+            "pitch_deg": -1.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 70.0,
+            "expected_top_cm": 90.0,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 42.3860474726017,
+                "line": [
+                  1037,
+                  435,
+                  1104,
+                  447
+                ],
+                "fill": 0.9793947198969736,
+                "edge_support": 0.8225806451612904,
+                "sides": 2
+              }
+            ],
+            "candidates": 0
+          },
+          "white_candidates": [],
+          "reason": "深度不足：没有有效白点云",
+          "rgb_contour_top_cm": 100.33057607954925,
+          "rgb_contour_rejected": "1",
+          "white_reading": {
+            "result": null,
+            "method": null,
+            "reason": "深度不足：没有有效白点云"
+          }
+        }
+      },
+      "6": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": -1.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 107,
+            "checks": [
+              {
+                "id": 15,
+                "bbox": [
+                  584,
+                  316,
+                  7,
+                  7
+                ],
+                "pixels": 34,
+                "inside_pixels": 34,
+                "coverage": 1.0,
+                "width_cm": 3.5771060372904127,
+                "width_limit_cm": 36.25841432298601,
+                "height_cm": 3.57675023027388,
+                "fill": 0.6938775510204082,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 28,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 20,
+                "bbox": [
+                  518,
+                  355,
+                  7,
+                  5
+                ],
+                "pixels": 16,
+                "inside_pixels": 16,
+                "coverage": 1.0,
+                "width_cm": 3.5771060372904127,
+                "width_limit_cm": 36.25841432298601,
+                "height_cm": 2.5548215930527713,
+                "fill": 0.45714285714285713,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 13,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 23,
+                "bbox": [
+                  600,
+                  369,
+                  3,
+                  25
+                ],
+                "pixels": 35,
+                "inside_pixels": 35,
+                "coverage": 1.0,
+                "width_cm": 1.533045444553034,
+                "width_limit_cm": 36.25841432298601,
+                "height_cm": 12.774107965263855,
+                "fill": 0.4666666666666667,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 35,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 26,
+                "bbox": [
+                  560,
+                  386,
+                  8,
+                  8
+                ],
+                "pixels": 55,
+                "inside_pixels": 55,
+                "coverage": 1.0,
+                "width_cm": 4.0881211854747574,
+                "width_limit_cm": 36.25841432298601,
+                "height_cm": 4.087714548884434,
+                "fill": 0.859375,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 26,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 4.648966953804002,
+            "pitch_deg": -1.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 70.0,
+            "expected_top_cm": 90.0,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "2",
+                "top_cm": 64.30089723336275,
+                "line": [
+                  462,
+                  367,
+                  498,
+                  366
+                ],
+                "fill": 1.0,
+                "edge_support": 1.0,
+                "sides": 2,
+                "side_columns": [
+                  463,
+                  528
+                ],
+                "complete_sides": true,
+                "absolute_state": "2",
+                "body_height_cm": 34.3784796007508,
+                "bottom_cm": 29.922417632611953,
+                "relative_state": "1"
+              },
+              {
+                "state": "1",
+                "top_cm": 28.459333024418036,
+                "line": [
+                  448,
+                  439,
+                  517,
+                  435
+                ],
+                "fill": 0.9177989130434783,
+                "edge_support": 0.890625,
+                "sides": 2
+              },
+              {
+                "state": "2",
+                "top_cm": 64.7995961203957,
+                "line": [
+                  481,
+                  366,
+                  529,
+                  365
+                ],
+                "fill": 1.0,
+                "edge_support": 1.0,
+                "sides": 2,
+                "side_columns": [
+                  463,
+                  528
+                ],
+                "complete_sides": true,
+                "absolute_state": "2",
+                "body_height_cm": 34.87717848778375,
+                "bottom_cm": 29.922417632611953,
+                "relative_state": "1"
+              }
+            ],
+            "candidates": 2,
+            "state": "1"
+          },
+          "upper_white": {},
+          "far_support": {
+            "reason": "远处粘连：缺少可核验白盒归属的深度"
+          },
+          "far_white": {
+            "reason": "白盒与背景未分离：缺少深度，需要侧向视角"
+          },
+          "rgb_white_edges": {
+            "candidates": 0,
+            "reason": "没有唯一且四边、顶底高度完整的RGB盒面"
+          },
+          "needs_parallax": true,
+          "white_candidates": [],
+          "reason": "彩色层高不符：可见高99.6厘米；一层允许2.0至6.0，两层允许20.0至60.0厘米",
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "彩色层高不符：可见高99.6厘米；一层允许2.0至6.0，两层允许20.0至60.0厘米"
+          },
+          "white_piece": [
+            [
+              [
+                463,
+                366
+              ]
+            ],
+            [
+              [
+                528,
+                365
+              ]
+            ],
+            [
+              [
+                528,
+                388
+              ]
+            ],
+            [
+              [
+                463,
+                389
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  },
+  {
+    "time_s": 135,
+    "depth": null,
+    "roll_assumed": 0,
+    "pose": [
+      -0.243,
+      0.195,
+      -46.9,
+      0
+    ],
+    "targets": {
+      "4": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": 0.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 96,
+            "checks": [
+              {
+                "id": 12,
+                "bbox": [
+                  940,
+                  269,
+                  3,
+                  17
+                ],
+                "pixels": 26,
+                "inside_pixels": 26,
+                "coverage": 1.0,
+                "width_cm": 0.6110175644965478,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 3.4620884647567887,
+                "fill": 0.5098039215686274,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 18,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 13,
+                "bbox": [
+                  805,
+                  274,
+                  12,
+                  24
+                ],
+                "pixels": 85,
+                "inside_pixels": 85,
+                "coverage": 1.0,
+                "width_cm": 2.444070257986191,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 4.887654303186054,
+                "fill": 0.2951388888888889,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 73,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 15,
+                "bbox": [
+                  588,
+                  333,
+                  5,
+                  5
+                ],
+                "pixels": 13,
+                "inside_pixels": 13,
+                "coverage": 1.0,
+                "width_cm": 1.0183626074942462,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 1.0182613131637612,
+                "fill": 0.52,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 13,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 16,
+                "bbox": [
+                  794,
+                  335,
+                  13,
+                  2
+                ],
+                "pixels": 16,
+                "inside_pixels": 16,
+                "coverage": 1.0,
+                "width_cm": 2.64774277948504,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 0.40730452526550454,
+                "fill": 0.6153846153846154,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 11,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 20,
+                "bbox": [
+                  920,
+                  365,
+                  9,
+                  8
+                ],
+                "pixels": 41,
+                "inside_pixels": 41,
+                "coverage": 1.0,
+                "width_cm": 1.8330526934896434,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 1.6292181010620181,
+                "fill": 0.5694444444444444,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 34,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 22,
+                "bbox": [
+                  898,
+                  382,
+                  9,
+                  6
+                ],
+                "pixels": 23,
+                "inside_pixels": 23,
+                "coverage": 1.0,
+                "width_cm": 1.8330526934896434,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 1.2219135757965136,
+                "fill": 0.42592592592592593,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 21,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 25,
+                "bbox": [
+                  960,
+                  400,
+                  6,
+                  10
+                ],
+                "pixels": 17,
+                "inside_pixels": 17,
+                "coverage": 1.0,
+                "width_cm": 1.2220351289930955,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 2.0365226263275225,
+                "fill": 0.2833333333333333,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 17,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 31,
+                "bbox": [
+                  958,
+                  417,
+                  4,
+                  22
+                ],
+                "pixels": 36,
+                "inside_pixels": 36,
+                "coverage": 1.0,
+                "width_cm": 0.8146900859953969,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 4.48034977792055,
+                "fill": 0.4090909090909091,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 35,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 32,
+                "bbox": [
+                  871,
+                  419,
+                  7,
+                  11
+                ],
+                "pixels": 16,
+                "inside_pixels": 16,
+                "coverage": 1.0,
+                "width_cm": 1.4257076504919448,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 2.240174888960275,
+                "fill": 0.2077922077922078,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 4,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 47,
+                "bbox": [
+                  957,
+                  449,
+                  2,
+                  7
+                ],
+                "pixels": 13,
+                "inside_pixels": 13,
+                "coverage": 1.0,
+                "width_cm": 0.40734504299769847,
+                "width_limit_cm": 37.621992809911745,
+                "height_cm": 1.4255658384292658,
+                "fill": 0.9285714285714286,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 12,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 1.8529134120785606,
+            "pitch_deg": 0.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 90.0,
+            "expected_top_cm": 110.00000000000001,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 57.849701585751234,
+                "line": [
+                  650,
+                  423,
+                  753,
+                  423
+                ],
+                "fill": 0.9955763086753502,
+                "edge_support": 1.0,
+                "sides": 2,
+                "side_columns": [
+                  610,
+                  804
+                ],
+                "complete_sides": true
+              },
+              {
+                "state": "2",
+                "top_cm": 88.69647024696266,
+                "line": [
+                  782,
+                  266,
+                  870,
+                  276
+                ],
+                "fill": 0.8860151064316777,
+                "edge_support": 0.6987951807228916,
+                "sides": 2
+              },
+              {
+                "state": "1",
+                "top_cm": 56.79738881917933,
+                "line": [
+                  586,
+                  431,
+                  666,
+                  424
+                ],
+                "fill": 0.9848866498740554,
+                "edge_support": 0.84,
+                "sides": 2,
+                "side_columns": [
+                  578,
+                  707
+                ],
+                "complete_sides": true
+              },
+              {
+                "state": "2",
+                "top_cm": 86.85519654917393,
+                "line": [
+                  822,
+                  273,
+                  915,
+                  286
+                ],
+                "fill": 0.8536751361161524,
+                "edge_support": 0.75,
+                "sides": 2
+              },
+              {
+                "state": "2",
+                "top_cm": 89.98121268798891,
+                "line": [
+                  758,
+                  257,
+                  851,
+                  273
+                ],
+                "fill": 0.9146183699870634,
+                "edge_support": 0.8181818181818182,
+                "sides": 2
+              }
+            ],
+            "candidates": 2,
+            "state": "1"
+          },
+          "white_candidates": [],
+          "reason": "深度不足：没有有效白点云",
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "深度不足：没有有效白点云；空点未证实：支撑面未完整入画、深度不足或高度不符"
+          },
+          "white_piece": [
+            [
+              [
+                610,
+                423
+              ]
+            ],
+            [
+              [
+                804,
+                423
+              ]
+            ],
+            [
+              [
+                804,
+                481
+              ]
+            ],
+            [
+              [
+                610,
+                481
+              ]
+            ]
+          ]
+        }
+      },
+      "5": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": 0.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 96,
+            "checks": [
+              {
+                "id": 10,
+                "bbox": [
+                  988,
+                  263,
+                  21,
+                  41
+                ],
+                "pixels": 282,
+                "inside_pixels": 282,
+                "coverage": 1.0,
+                "width_cm": 6.666674473872117,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 13.014593596201268,
+                "fill": 0.32752613240418116,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 175,
+                "need": 28,
+                "suspected": false
+              },
+              {
+                "id": 12,
+                "bbox": [
+                  940,
+                  269,
+                  3,
+                  17
+                ],
+                "pixels": 26,
+                "inside_pixels": 26,
+                "coverage": 1.0,
+                "width_cm": 0.9523820676960165,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 5.396294905741989,
+                "fill": 0.5098039215686274,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 18,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 20,
+                "bbox": [
+                  920,
+                  365,
+                  9,
+                  8
+                ],
+                "pixels": 41,
+                "inside_pixels": 41,
+                "coverage": 1.0,
+                "width_cm": 2.8571462030880497,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 2.5394328968197595,
+                "fill": 0.5694444444444444,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 34,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 22,
+                "bbox": [
+                  898,
+                  382,
+                  9,
+                  6
+                ],
+                "pixels": 23,
+                "inside_pixels": 23,
+                "coverage": 1.0,
+                "width_cm": 2.8571462030880497,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 1.9045746726148196,
+                "fill": 0.42592592592592593,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 21,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 23,
+                "bbox": [
+                  1001,
+                  397,
+                  11,
+                  3
+                ],
+                "pixels": 21,
+                "inside_pixels": 21,
+                "coverage": 1.0,
+                "width_cm": 3.4920675815520608,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 0.9522873363074098,
+                "fill": 0.6363636363636364,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 20,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 25,
+                "bbox": [
+                  960,
+                  400,
+                  6,
+                  10
+                ],
+                "pixels": 17,
+                "inside_pixels": 17,
+                "coverage": 1.0,
+                "width_cm": 1.904764135392033,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 3.1742911210246993,
+                "fill": 0.2833333333333333,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 17,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 31,
+                "bbox": [
+                  958,
+                  417,
+                  4,
+                  22
+                ],
+                "pixels": 36,
+                "inside_pixels": 36,
+                "coverage": 1.0,
+                "width_cm": 1.2698427569280222,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 6.983440466254338,
+                "fill": 0.4090909090909091,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 35,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 32,
+                "bbox": [
+                  871,
+                  419,
+                  7,
+                  11
+                ],
+                "pixels": 16,
+                "inside_pixels": 12,
+                "coverage": 0.75,
+                "width_cm": 2.2222248246240386,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 3.491720233127169,
+                "fill": 0.2077922077922078,
+                "failures": [
+                  "填充率不足45%",
+                  "格内覆盖不足90%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 4,
+                "blue_pixels": 0,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 33,
+                "bbox": [
+                  999,
+                  418,
+                  12,
+                  36
+                ],
+                "pixels": 127,
+                "inside_pixels": 127,
+                "coverage": 1.0,
+                "width_cm": 3.809528270784066,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 11.427448035688919,
+                "fill": 0.29398148148148145,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 113,
+                "need": 12,
+                "suspected": false
+              },
+              {
+                "id": 45,
+                "bbox": [
+                  979,
+                  442,
+                  10,
+                  14
+                ],
+                "pixels": 56,
+                "inside_pixels": 56,
+                "coverage": 1.0,
+                "width_cm": 3.1746068923200554,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 4.4440075694345795,
+                "fill": 0.4,
+                "failures": [
+                  "填充率不足45%",
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 42,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 47,
+                "bbox": [
+                  957,
+                  449,
+                  2,
+                  7
+                ],
+                "pixels": 13,
+                "inside_pixels": 13,
+                "coverage": 1.0,
+                "width_cm": 0.6349213784640111,
+                "width_limit_cm": 39.51229092373269,
+                "height_cm": 2.2220037847172898,
+                "fill": 0.9285714285714286,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 12,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 2.8881027472771303,
+            "pitch_deg": 0.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 70.0,
+            "expected_top_cm": 90.0,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 38.9102698396446,
+                "line": [
+                  999,
+                  471,
+                  1065,
+                  463
+                ],
+                "fill": 1.0,
+                "edge_support": 0.9016393442622951,
+                "sides": 2,
+                "side_columns": [
+                  975,
+                  1070
+                ],
+                "complete_sides": true
+              },
+              {
+                "state": "1",
+                "top_cm": 38.25008895044091,
+                "line": [
+                  901,
+                  462,
+                  961,
+                  469
+                ],
+                "fill": 0.9985207100591716,
+                "edge_support": 0.9818181818181818,
+                "sides": 0
+              },
+              {
+                "state": "1",
+                "top_cm": 38.549525665910785,
+                "line": [
+                  999,
+                  474,
+                  1085,
+                  463
+                ],
+                "fill": 1.0,
+                "edge_support": 0.8641975308641975,
+                "sides": 1,
+                "side_columns": [
+                  975,
+                  1085
+                ],
+                "complete_sides": false
+              },
+              {
+                "state": "1",
+                "top_cm": 39.797249963197146,
+                "line": [
+                  894,
+                  464,
+                  952,
+                  457
+                ],
+                "fill": 0.9791245791245792,
+                "edge_support": 1.0,
+                "sides": 0
+              },
+              {
+                "state": "1",
+                "top_cm": 38.34926254736569,
+                "line": [
+                  994,
+                  472,
+                  1054,
+                  465
+                ],
+                "fill": 1.0,
+                "edge_support": 0.9636363636363636,
+                "sides": 2,
+                "side_columns": [
+                  975,
+                  1070
+                ],
+                "complete_sides": true
+              }
+            ],
+            "candidates": 3,
+            "state": "1"
+          },
+          "white_candidates": [],
+          "reason": "深度不足：没有有效白点云",
+          "faction": {
+            "distance_m": 2.8881027472771303,
+            "cap_px": 63,
+            "red_pixels": 0,
+            "blue_pixels": 0,
+            "result": null,
+            "status": "带内没有红蓝像素",
+            "need": 0,
+            "bbox": [
+              942,
+              267,
+              948,
+              292
+            ],
+            "band": [
+              [
+                true,
+                true,
+                true,
+                true,
+                true,
+                true
+              ],
+              [
+                true,
+                true,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                true
+              ]
+            ],
+            "tops": [
+              269,
+              269,
+              268,
+              268,
+              268,
+              292
+            ],
+            "raw_red_pixels": 0,
+            "raw_blue_pixels": 0,
+            "red": [
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ]
+            ],
+            "blue": [
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ],
+              [
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+              ]
+            ]
+          },
+          "rgb_contour_top_cm": 103.75565255925522,
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "深度不足：没有有效白点云"
+          },
+          "white_piece": [
+            [
+              [
+                975,
+                474
+              ]
+            ],
+            [
+              [
+                1070,
+                462
+              ]
+            ],
+            [
+              [
+                1070,
+                499
+              ]
+            ],
+            [
+              [
+                975,
+                511
+              ]
+            ]
+          ]
+        }
+      },
+      "6": {
+        "result": "1",
+        "reason": null,
+        "method": "RGB局部盒面",
+        "diagnostic": {
+          "roll_deg": 0.0,
+          "pitch_deg": 0.0,
+          "rgb_cap": {
+            "candidates": 0,
+            "components": 96,
+            "checks": [
+              {
+                "id": 15,
+                "bbox": [
+                  588,
+                  333,
+                  5,
+                  5
+                ],
+                "pixels": 13,
+                "inside_pixels": 13,
+                "coverage": 1.0,
+                "width_cm": 2.548838522828584,
+                "width_limit_cm": 36.152886841509876,
+                "height_cm": 2.548584995362253,
+                "fill": 0.52,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 13,
+                "need": 8,
+                "suspected": false
+              },
+              {
+                "id": 18,
+                "bbox": [
+                  518,
+                  355,
+                  7,
+                  5
+                ],
+                "pixels": 19,
+                "inside_pixels": 19,
+                "coverage": 1.0,
+                "width_cm": 3.568373931960018,
+                "width_limit_cm": 36.152886841509876,
+                "height_cm": 2.548584995362253,
+                "fill": 0.5428571428571428,
+                "failures": [
+                  "红或蓝面积不足（可能单色/断开）"
+                ],
+                "side_visible_fraction": 1.0,
+                "red_pixels": 0,
+                "blue_pixels": 19,
+                "need": 8,
+                "suspected": false
+              }
+            ],
+            "state": "absent",
+            "suspected_components": [],
+            "distance_m": 4.637618319266768,
+            "pitch_deg": 0.0,
+            "roll_deg": 0.0,
+            "yaw_deg": -46.900000000000006,
+            "expected_bottom_cm": 70.0,
+            "expected_top_cm": 90.0,
+            "close_radius_px": 3,
+            "reason": "没有合格候选"
+          },
+          "rgb_white_top": {
+            "checks": [
+              {
+                "state": "1",
+                "top_cm": 30.88057849849342,
+                "line": [
+                  498,
+                  447,
+                  530,
+                  449
+                ],
+                "fill": 1.0,
+                "edge_support": 1.0,
+                "sides": 1,
+                "side_columns": [
+                  498,
+                  551
+                ],
+                "complete_sides": false
+              },
+              {
+                "state": "1",
+                "top_cm": 36.804503709752275,
+                "line": [
+                  480,
+                  437,
+                  514,
+                  436
+                ],
+                "fill": 0.9955022488755623,
+                "edge_support": 0.8275862068965517,
+                "sides": 1
+              },
+              {
+                "state": "2",
+                "top_cm": 72.35906602572118,
+                "line": [
+                  463,
+                  367,
+                  511,
+                  366
+                ],
+                "fill": 1.0,
+                "edge_support": 1.0,
+                "sides": 2,
+                "side_columns": [
+                  462,
+                  528
+                ],
+                "complete_sides": true,
+                "absolute_state": "2",
+                "body_height_cm": 34.27680047317842,
+                "bottom_cm": 38.08226555254276,
+                "relative_state": "1"
+              },
+              {
+                "state": "1",
+                "top_cm": 37.00844673186132,
+                "line": [
+                  475,
+                  438,
+                  544,
+                  434
+                ],
+                "fill": 0.9870923913043478,
+                "edge_support": 0.921875,
+                "sides": 1
+              },
+              {
+                "state": "2",
+                "top_cm": 72.8815910512126,
+                "line": [
+                  489,
+                  366,
+                  528,
+                  365
+                ],
+                "fill": 1.0,
+                "edge_support": 1.0,
+                "sides": 2,
+                "side_columns": [
+                  462,
+                  528
+                ],
+                "complete_sides": true,
+                "absolute_state": "2",
+                "body_height_cm": 34.799325498669845,
+                "bottom_cm": 38.08226555254276,
+                "relative_state": "1"
+              }
+            ],
+            "candidates": 3,
+            "state": "1"
+          },
+          "upper_white": {},
+          "far_support": {
+            "reason": "远处粘连：缺少可核验白盒归属的深度"
+          },
+          "far_white": {
+            "reason": "白盒与背景未分离：缺少深度，需要侧向视角"
+          },
+          "rgb_white_edges": {
+            "candidates": 0,
+            "reason": "没有唯一且四边、顶底高度完整的RGB盒面"
+          },
+          "needs_parallax": true,
+          "white_candidates": [],
+          "reason": "彩色层高不符：可见高95.8厘米；一层允许2.0至6.0，两层允许20.0至60.0厘米",
+          "white_reading": {
+            "result": "1",
+            "method": "RGB局部盒面",
+            "reason": "彩色层高不符：可见高95.8厘米；一层允许2.0至6.0，两层允许20.0至60.0厘米"
+          },
+          "white_piece": [
+            [
+              [
+                462,
+                367
+              ]
+            ],
+            [
+              [
+                528,
+                365
+              ]
+            ],
+            [
+              [
+                528,
+                388
+              ]
+            ],
+            [
+              [
+                462,
+                390
+              ]
+            ]
+          ]
+        }
+      }
+    }
+  }
+]

@@ -20,8 +20,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, load_intrinsics, load_setup
-from field_map import TOWER_NO, all_cells, tower_cells
-from motion import GOAL_BEARING, heading_words, format_pitch, survey
+from field_map import (TOWER_NO, all_cells, tower_cells, ORIGIN_X, CELL_M,
+                       LEFT_CORRIDOR_MAX_Y, RIGHT_CORRIDOR_MAX_Y)
+from motion import heading_words, format_pitch, survey
 from report import FieldWatch
 from view_field import ROOT, _live, can_pose_text
 from radar_pose import add_radar_arguments, normalize_source, open_radar, radar_pose_text
@@ -128,29 +129,28 @@ def select_route_stop(view: dict, stops: list, index: int, current_yaw: float) -
 
 def stop_lines(stops: list, index: int, chosen: int = 0, arrival_yaw: float | None = None) -> list[str]:
     stop = stops[index]
-    lines = [f"{stop.kind}（{index + 1}/{len(stops)}）：车停在这里，原地转动观察"]
+    lines = [f"{stop.kind}（{index + 1}/{len(stops)}）：车停在这里，按一组固定姿态观察",
+             f"右前角点位：x={stop.x:+.3f} m y={stop.y:+.3f} m"]
     if not stop.looks:
-        return lines + ["这一站没有新的待观察塔"]
-    lines.append("以下是车头目标朝向，以场地正前方为0°；不是每次再转这么多")
-    offsets = tuple(dict.fromkeys(GOAL_BEARING))
-    lines.append("本站可观测塔：" + '、'.join(look.number for look in stop.looks) + "（再点本站切换）")
+        return lines + ["当前姿态没有可观测塔；只前往后续补充点"]
+    lines.append("本站只观察：" + '、'.join(look.number+'号' for look in stop.looks))
     look = stop.looks[chosen % len(stop.looks)]
-    lines.append(f"{look.number}号塔【当前选择】：先朝{heading_words(look.yaw_deg)}，相机{format_pitch(look.pitch_deg)}")
-    headings = '、'.join(heading_words(look.yaw_deg + delta) for delta in offsets)
-    lines.append(f"依次朝向：{headings}")
+    common = len({(item.yaw_deg,item.pitch_deg) for item in stop.looks}) == 1
+    label = '本点统一姿态' if common else f'{look.number}号塔【当前选择】'
+    lines.append(f"{label}：先朝{heading_words(look.yaw_deg)}，相机{format_pitch(look.pitch_deg)}")
     if arrival_yaw is not None:
-        look = stop.looks[chosen % len(stop.looks)]
-        turn = (look.yaw_deg - math.degrees(arrival_yaw) + 180.0) % 360.0 - 180.0
-        if abs(turn) <= 3.0:
-            lines.append(f"看{look.number}号第一档：选中时车头已对准（允许误差±3°）")
+        turn = (look.yaw_deg-math.degrees(arrival_yaw)+180.)%360.-180.
+        if abs(turn) <= 3.:
+            lines.append("车头已对准（允许误差±3°）")
         else:
-            side = "左" if turn > 0 else "右"
-            lines.append(f"看{look.number}号第一档：从选中时的车头向{side}转 {abs(turn):.0f} 度")
-    look = stop.looks[chosen % len(stop.looks)]
-    pitches = '、'.join(format_pitch(look.pitch_deg+d) for d in (0.,8.,-8.))
-    lines.append(f"当前塔每个朝向都测：{pitches}（其他塔也按基准上下各8°）")
-    lines.append("近处两档、远处三档俯仰一致才确认；出画档跳过")
-    lines.append("回车打开相机自动测量；再点本站可切换所选塔")
+            lines.append(f"从选中时的车头向{'左' if turn > 0 else '右'}转 {abs(turn):.0f} 度")
+    lines += ["假设观测准确；已观测塔跳过，每个补充点仅一组朝向和俯仰",
+              "回车打开相机；到位停稳后一次观察本站目标"]
+    if stop.fallback:
+        lines.append("中距离分离视角不足：本点为兜底观察视角")
+    missing = getattr(stops,'unobserved',())
+    if missing:
+        lines.append("暂无安全补充点的塔：" + '、'.join(TOWER_NO[n]+'号' for n in missing))
     return lines
 
 
@@ -389,6 +389,15 @@ def _draw_map(
     font = ImageFont.truetype(_FONT, 16)
     panel = Image.fromarray(cv2.cvtColor(board, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(panel)
+    # 与导航使用相同的左右走廊限制，避免图上与实际规划范围不一致。
+    right_edge = ORIGIN_X+3*CELL_M
+    for x0,x1,limit,color in ((X_MIN,ORIGIN_X,LEFT_CORRIDOR_MAX_Y,(255,210,40)),
+                             (right_edge,X_MAX,RIGHT_CORRIDOR_MAX_Y,(245,75,85))):
+        u0,v0 = _pixel(x0,limit)
+        u1,v1 = _pixel(x1,limit)
+        draw.line((u0,v0,u1,v1),fill=color,width=4)
+        draw.text((u0+10,v0-24),f"走廊上限 Y={limit:.3f} m",font=font,fill=color)
+
     for cell in all_cells():
         u, v = _pixel(cell.x, cell.y)
         if cell.tower:
@@ -426,7 +435,7 @@ def _draw_map(
         # 实际执行段加粗橙色；兜底只在确实需要时出现，不预画整条远端环路。
         draw.line([_pixel(x,y) for x,y in route_state['active']],fill=(255,150,40),width=5)
     if route_stops:
-        draw.text((560,60),"绿：A→一个沿途点→B  灰：备用点  橙：当前执行段",font=font,fill=(100,235,180))
+        draw.text((560,60),"绿：初始点→补充点（仅未观测塔）  橙：当前执行段",font=font,fill=(100,235,180))
     for point in (route_state or {}).get('reserve_points', []):
         u, v = _pixel(*point)
         draw.ellipse((u-7,v-7,u+7,v+7), outline=(170,170,170), width=2)
@@ -437,7 +446,7 @@ def _draw_map(
             draw.ellipse((u - 8, v - 8, u + 8, v + 8), fill=(255, 140, 0), outline=(255, 230, 160))
         else:
             draw.ellipse((u - 7, v - 7, u + 7, v + 7), outline=(60, 230, 150), width=2)
-        label = 'A' if index == 1 else 'B' if index == len(route_stops) else f'途{index-1}'
+        label = '初' if index == 1 else f'补{index-1}'
         label_y = v-32 if index % 2 else v+14
         draw.text((u-5,label_y),label,font=font,fill=(160,255,200))
     if marker is not None:
@@ -453,7 +462,7 @@ def _draw_map(
         if used:
             hint = f"点新的右前角，或按 1 到 {len(used)} 选用之前的点。俯仰 {pitch:.0f} 度。q 退出"
     else:
-        hint = "点路线上的圆点，右前角和航向改到这一站算出的角度。再点同一站换下一格。回车打开相机。q 退出"
+        hint = "点补充点查看唯一的点位/朝向/俯仰；只观察此前未看到的塔。回车打开相机。q 退出"
     if radar_live:
         hint = "雷达实时车位；点击路线点只选择目标，回车打开相机。q 退出" if marker is not None else "等待雷达有效位姿，暂停计算。q 退出"
     draw.text((8, 8), hint, font=font, fill=(255, 255, 255))
@@ -661,7 +670,7 @@ def main() -> None:
                     route_points = []
                 else:
                     pose = pose_for_corner(marker[0], marker[1], heading)
-                    route_stops, line = survey(pose, np.zeros(2, dtype=float), intrinsics)
+                    route_stops, line = survey(pose, np.zeros(2, dtype=float), intrinsics, pitch)
                     route_line = list(line)
                     route_points = [(stop.x, stop.y) for stop in route_stops]
                 view["stops"] = route_points

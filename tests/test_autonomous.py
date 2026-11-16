@@ -33,14 +33,15 @@ def make_survey(monkeypatch):
         votes={n: Vote() for n in DISPLAY}, _arrived=lambda action: True)
     monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda cell, *args: cell.name == name)
     monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda *args: False)
-    monkeypatch.setattr(autonomous, 'primary_route', lambda *args: ([],[]))
     monkeypatch.setattr(autonomous, 'nearest_observation', lambda *args: Action('blocked', '无安全位置'))
-    def aim(n, v, p, o, pitch, color, intr, attempt):
+    def aim(n, v, p, o, pitch, color, intr, attempt, targets=None):
         if attempt == 1 and abs(pitch-8.) > 1:
             return Action('pitch', '抬头到8度', pitch=8., cell=n, attempt=1)
         return Action('wait', '', cell=n, attempt=attempt)
     monkeypatch.setattr(autonomous, '_aim_cell', aim)
-    survey = AutonomousSurvey(watch, clock)
+    survey = AutonomousSurvey(watch, clock, stationary_scan=True)
+    monkeypatch.setattr(survey, '_targets', lambda n: tuple(zip(autonomous.GOAL_BEARING,
+                         (watch.views[n].pitch_target_deg+d for d in autonomous.PITCH_OFFSET))))
     return survey, watch, clock, name
 
 
@@ -72,66 +73,42 @@ def test_unknown_ratio_and_frame_gaps_prevent_confirmation():
     assert evidence.windows == 0
 
 
-def test_automatic_memory_conflict_and_different_view_resolution(monkeypatch, tmp_path):
+def test_first_valid_result_is_remembered_without_conflict_rechecks(monkeypatch, tmp_path):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 7)
-    assert watch.votes[name].locked is None
-    assert len(survey.pitch_checks[name]) == 1
-    assert survey.action.kind == 'pitch'
-    watch.pitch = 8.
-    observe(survey, clock, 7)
+    survey.update()
     assert watch.votes[name].locked == '1'
-    assert any(item['event'] == 'confirmed' for item in survey.history[name])
+    assert not survey.pitch_checks[name]
     watch.views[name].conclusion = '2'
     observe(survey, clock, 9)
     assert watch.votes[name].locked == '1'
-    assert watch.votes[name].recheck
-    text = '\n'.join(survey.lines())
-    assert '原确认：一层；新稳定识别：两层；当前复核：两层' in text
-    assert '流程改为优先复核' in text
-    assert '旧结果暂留，不计完成' in text
-    assert survey.snapshot()['conflict_results'][name]['detected'] == '2'
-    assert not survey.complete
-    # 同一俯仰重复长时观察，不能补足第二档。
-    observe(survey, clock, 8)
-    assert watch.votes[name].locked == '1'
-    watch.pitch = 0.
-    observe(survey, clock, 7)
-    assert watch.votes[name].locked == '2'
     assert not watch.votes[name].recheck
-    assert survey.history[name][-1]['event'] == 'resolved'
-    assert survey.history[name][-1]['previous'] == '1'
+    assert [item['event'] for item in survey.history[name]] == ['confirmed']
     output = tmp_path/'memory.json'
     survey.save(output)
     saved = json.loads(output.read_text())
-    assert saved['results'][name] == '2'
-    assert name not in saved['conflict_results']
-    assert '冲突已解决：一层→两层' in '\n'.join(survey.lines())
-    assert not saved['complete']
+    assert saved['results'][name] == '1'
+    assert name not in saved['pending']
+    assert not saved['conflict_results']
 
 
-def test_missing_frames_and_movement_do_not_accumulate_confirmation(monkeypatch):
+def test_missing_color_and_unstable_camera_cannot_record_results(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 3)
     watch.have_color = False
-    observe(survey, clock, 1)
+    survey.update()
+    assert watch.votes[name].locked is None
     watch.have_color = True
-    observe(survey, clock, 3)
+    watch.stable_frames = 0
+    survey.update()
     assert watch.votes[name].locked is None
-    watch.last_pose = CarPose(.05, 0, 0)
-    observe(survey, clock, 3)
-    assert watch.votes[name].locked is None
-    observe(survey, clock, 4)
-    assert watch.votes[name].locked is None
-    watch.pitch = 8.
-    observe(survey, clock, 7)
+    watch.stable_frames = 10
+    survey.update()
     assert watch.votes[name].locked == '1'
 
 
 def test_unknown_keeps_task_open_instead_of_finishing(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     watch.views[name].conclusion = None
-    monkeypatch.setattr(autonomous, '_aim_cell', lambda n,v,p,o,pi,c,i,a: Action('wait', '', cell=n, attempt=a))
+    monkeypatch.setattr(autonomous, '_aim_cell', lambda n,v,p,o,pi,c,i,a,*args: Action('wait', '', cell=n, attempt=a))
     observe(survey, clock, autonomous.LOOK_SECONDS * (autonomous.MAX_TRIES + 1))
     assert not survey.complete
     assert watch.votes[name].locked is None
@@ -193,14 +170,14 @@ def test_frame_gap_preserves_attempt_deadline_but_discards_evidence(monkeypatch)
     assert watch.votes[name].locked is None
 
 
-def test_final_summary_only_after_every_tower_has_no_conflict(monkeypatch):
+def test_final_summary_requires_a_result_for_every_tower(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     for vote in watch.votes.values():
         vote.locked = '1'
     survey.update()
     assert survey.complete
     assert '最终结果' in survey.lines()
-    watch.votes[name].recheck = True
+    watch.votes[name].locked = None
     assert not survey.complete
     assert '最终结果' not in survey.lines()
 
@@ -215,15 +192,15 @@ def test_nearest_observation_prefers_small_move_and_shared_tasks(monkeypatch):
     monkeypatch.setattr(motion, '_travel', lambda x,y,a,b,*args: (math.hypot(x-a,y-b), [(x,y),(a,b)]))
     monkeypatch.setattr(motion, 'observation_poses', lambda cell,p,*args: iter([(0,p,0.)]))
     action = motion.nearest_observation(CarPose(0,0,0), np.zeros(2), None, list(DISPLAY))
-    assert action.kind == 'move'
-    assert math.isclose(math.hypot(action.final_x, action.final_y), .1)
+    assert action.kind == 'wait'
+    assert action.observation_x == 0 and action.observation_y == 0
     assert set(action.cells) == set(DISPLAY)
     monkeypatch.setattr(motion, '_travel', lambda *args: None)
     assert motion.nearest_observation(CarPose(0,0,0), np.zeros(2), None, list(DISPLAY)).kind == 'blocked'
 
 
-def test_field_watch_live_supervisor_bypasses_short_vote_lock(monkeypatch):
-    from car_pose import Setup
+def test_field_watch_records_first_stable_result_without_vote_delay(monkeypatch):
+    from car_pose import Setup, OBS_STABLE_FRAMES
     from report import FieldWatch
     import report
     survey, fake, clock, name = make_survey(monkeypatch)
@@ -231,32 +208,25 @@ def test_field_watch_live_supervisor_bypasses_short_vote_lock(monkeypatch):
     watch.enable_autonomy(clock)
     monkeypatch.setattr(report, 'inspect_frame', lambda *args: fake.views)
     color = np.zeros((2, 2, 3), np.uint8)
-    for _ in range(30):
+    for _ in range(OBS_STABLE_FRAMES):
         clock.now += .05
         watch.update(fake.last_pose, color)
-    assert watch.votes[name].locked is None
-    for _ in range(140):
-        clock.now += .05
-        watch.update(fake.last_pose, color)
-    assert watch.votes[name].locked is None
-    watch.pitch = 8.
-    for _ in range(150):
-        clock.now += .05
-        watch.update(fake.last_pose, color)
+        assert watch.votes[name].locked is None
+    clock.now += .05
+    watch.update(fake.last_pose, color)
     assert watch.votes[name].locked == '1'
-    assert any('1号' in line for line in watch.lines('basic'))
-    assert watch.autonomy.history[name]
+    assert len(watch.autonomy.history[name]) == 1
 
 
-def test_parallax_request_finishes_stationary_angles_before_moving(monkeypatch):
+def test_parallax_request_uses_move_planner_after_failed_stationary_observation(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
     watch.views[name].conclusion = None
     watch.views[name].needs_parallax = True
     observe(survey, clock, 1)
     assert survey.action.kind == 'wait'
     observe(survey, clock, autonomous.LOOK_SECONDS + 1)
-    assert survey.action.kind == 'pitch'
-    assert survey.attempts[name] == 1
+    assert survey.action.kind == 'blocked'  # 本测试的换位规划器没有安全落点。
+    assert survey.attempts[name] == autonomous.MAX_TRIES
 
 
 def test_yaw_arrival_accepts_two_degree_error_and_wraparound():
@@ -293,27 +263,25 @@ def test_every_yaw_has_three_pitch_options():
         assert [pitch for goal,pitch in zip(GOAL_BEARING,PITCH_OFFSET) if goal == yaw] == [0.,8.,-8.]
 
 
-def test_pitch_disagreement_discards_old_evidence(monkeypatch):
+def test_other_pitch_does_not_reopen_identified_tower(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 7)
+    survey.update()
     watch.pitch = 8.
     watch.views[name].conclusion = '2'
     observe(survey, clock, 7)
-    assert watch.votes[name].locked is None
-    assert survey.pitch_checks[name] == [dict(result='2',pitch=8.)]
-    watch.pitch = -8.
-    observe(survey, clock, 7)
-    assert watch.votes[name].locked == '2'
+    assert watch.votes[name].locked == '1'
+    assert not watch.votes[name].recheck
+    assert not survey.pitch_checks[name]
 
 
-def test_pitch_candidates_do_not_accumulate_across_positions(monkeypatch):
+def test_identified_result_survives_change_of_position(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 7)
+    survey.update()
     watch.last_pose = CarPose(.11,0,0)
-    watch.pitch = 8.
-    observe(survey, clock, 7)
-    assert watch.votes[name].locked is None
-    assert len(survey.pitch_checks[name]) == 1
+    watch.views[name].conclusion = None
+    observe(survey, clock, 1)
+    assert watch.votes[name].locked == '1'
+    assert name not in survey.snapshot()['pending']
 
 
 def test_rotation_translation_preserves_scan_and_pitch_checks(monkeypatch):
@@ -397,17 +365,14 @@ def test_heading_targets_remain_fixed_despite_live_pose_changes(monkeypatch):
     assert watch.views[name].bearing_deg == 12.1
 
 
-def test_window_shows_pitch_sequence_and_cross_check_progress(monkeypatch):
+def test_window_shows_view_adjustment_without_cross_checks(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 7)
-    assert '停止！' in '\n'.join(survey.lines())
-    watch.pitch = 8.
-    clock.now += autonomous.STOP_HOLD_SECONDS + .1
+    watch.views[name].conclusion = None
     survey.update()
     text = '\n'.join(survey.lines())
-    assert '俯仰复核1/2档' in text
-    assert '每个朝向的相机姿态' in text
-    assert '抬头到 8 度' in text and '低头到 8 度' in text
+    assert '候选相机俯仰' in text
+    assert '仅未看清时继续调整视角' in text
+    assert '俯仰复核' not in text
 
 
 def test_candidate_coverage_can_outweigh_nearest_single_tower(monkeypatch):
@@ -431,11 +396,11 @@ def test_candidate_coverage_can_outweigh_nearest_single_tower(monkeypatch):
     action = motion.nearest_observation(pose,np.zeros(2),None,names)
     assert math.isclose(action.final_x,.2)
     assert set(action.cells) == set(names)
-    # 共享点有绕障代价时，不能只看直线距离或覆盖数量。
+    # 新评分优先观测质量和覆盖；绕行稍长也保留可覆盖两塔的点。
     monkeypatch.setattr(motion, '_travel', lambda x,y,a,b,*args: (1. if a>.15 else .1,[(x,y),(a,b)]))
     action = motion.nearest_observation(pose,np.zeros(2),None,names)
-    assert math.isclose(action.final_x,.1)
-    assert action.cells == (names[0],)
+    assert math.isclose(action.final_x,.2)
+    assert set(action.cells) == set(names)
     # 真正需要视差时，共享点也不能绕过侧向基线要求。
     monkeypatch.setattr(motion, '_different_view', lambda *args: False)
     action = motion.nearest_observation(pose,np.zeros(2),None,names,references={n:(0,0) for n in names})
@@ -507,75 +472,54 @@ def test_seventy_percent_agreement_accepts_unknowns_but_not_split_results():
         assert evidence.windows == (1 if expected else 0)
 
 
-def test_observation_jitter_does_not_clear_evidence_but_real_motion_does(monkeypatch):
+def test_motion_does_not_erase_identified_result(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    observe(survey, clock, 3)
+    survey.update()
     watch.last_pose = CarPose(.025, 0, math.radians(2.5))
-    watch.pitch = 2.5
-    watch.roll = 2.5
-    observe(survey, clock, .1)
-    assert survey.evidence[name].windows == 1
     watch.pitch = 6.
-    observe(survey, clock, .1)
-    assert survey.evidence[name].windows == 0
+    watch.roll = 2.5
+    survey.update()
+    assert watch.votes[name].locked == '1'
+    assert len(survey.history[name]) == 1
 
 
-def test_conflict_window_explains_movement_and_blocked_followup(monkeypatch):
+def test_window_reports_identified_and_unseen_towers(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    watch.votes[name].locked = '红'
-    watch.votes[name].recheck = True
-    survey.conflict_results[name] = dict(previous='红',detected='蓝',candidate='红')
-    survey.action = Action('move', '换位', x=1., y=0., cell=name)
+    survey.update()
     text = '\n'.join(survey.lines())
-    assert '原确认：红顶；新稳定识别：蓝顶；当前复核：红顶' in text
-    assert '换到新观察点' in text
-    survey.action = Action('blocked', '等待')
-    assert '保留冲突，等待条件变化后重试' in '\n'.join(survey.lines())
+    assert '1；已识别' in text
+    assert '尚未看清' in text
+    assert '冲突' not in text
 
 
-def test_far_rgb_is_tried_here_and_two_pitches_remove_move_task(monkeypatch):
+def test_far_rgb_result_finishes_without_extra_pitch_or_movement(monkeypatch):
     from field_map import tower_cells
-    from car_pose import camera_position
     survey, watch, clock, name = make_survey(monkeypatch)
     cell = next(c for c in tower_cells() if c.name == name)
     watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
-    monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda *args: False)
-    monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda c,*args: c.name == name)
     watch.views[name].conclusion = '红'
     watch.views[name].method = 'RGB顶块'
     for n,vote in watch.votes.items():
         if n != name:
             vote.locked = '1'
-    observe(survey,clock,7)
-    assert watch.votes[name].locked is None
-    assert survey.action.kind == 'pitch'
-    watch.pitch = 8.
-    observe(survey,clock,7)
-    assert watch.votes[name].locked is None
-    watch.pitch = -8.
-    observe(survey,clock,7)
+    survey.update()
     assert watch.votes[name].locked == '红'
     assert survey.action.kind == 'stop'
     assert survey.complete
 
 
-def test_far_rgb_opportunity_cannot_confirm_empty_or_white_only(monkeypatch):
-    from field_map import tower_cells
+def test_skip_vote_prevents_recording_even_when_conclusion_present(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    cell = next(c for c in tower_cells() if c.name == name)
-    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
-    monkeypatch.setattr(autonomous,'fits_rgb_when_aimed',lambda c,*args: c.name == name)
-    for value in ('0','1','2'):
-        watch.views[name].conclusion = value
-        observe(survey,clock,7)
-        watch.pitch += 8.
-        observe(survey,clock,7)
-        assert watch.votes[name].locked is None
-        assert not survey.pitch_checks[name]
+    watch.views[name].skip_vote = True
+    survey.update()
+    assert watch.votes[name].locked is None
+    watch.views[name].skip_vote = False
+    survey.update()
+    assert watch.votes[name].locked == '1'
 
 
 @pytest.mark.parametrize('value', ['1', '2'])
-def test_verified_far_white_accumulates_three_pitch_checks(monkeypatch, value):
+def test_valid_far_white_is_recorded_without_pitch_checks(monkeypatch, value):
     from field_map import tower_cells
     survey, watch, clock, name = make_survey(monkeypatch)
     cell = next(c for c in tower_cells() if c.name == name)
@@ -583,26 +527,18 @@ def test_verified_far_white_accumulates_three_pitch_checks(monkeypatch, value):
     view = watch.views[name]
     view.conclusion, view.method = value, '远处白盒'
     view.measurements = {'far_white': {'upper_clear': True}}
-    observe(survey,clock,7)
-    assert len(survey.pitch_checks[name]) == 1
-    watch.pitch = 8.
-    observe(survey,clock,7)
-    assert len(survey.pitch_checks[name]) == 2
-    assert watch.votes[name].locked is None
-    watch.pitch = -8.
-    observe(survey,clock,7)
+    survey.update()
     assert watch.votes[name].locked == value
-
-
-def test_far_white_without_upper_space_verification_is_not_counted(monkeypatch):
-    from field_map import tower_cells
-    survey, watch, clock, name = make_survey(monkeypatch)
-    cell = next(c for c in tower_cells() if c.name == name)
-    watch.last_pose = CarPose(cell.x,cell.y-4.5,0.)
-    watch.views[name].method = '远处白盒'
-    watch.views[name].measurements = {'far_white': {'upper_clear': False}}
-    observe(survey,clock,7)
     assert not survey.pitch_checks[name]
+
+
+def test_unknown_far_white_remains_pending(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    watch.views[name].method = '远处白盒'
+    survey.update()
+    assert watch.votes[name].locked is None
+    assert name in survey.snapshot()['pending']
 
 
 def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range():
@@ -618,32 +554,25 @@ def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range()
     assert motion.DEPTH_FAR_M == 3.
 
 
-def test_primary_stations_run_before_far_fallback(monkeypatch):
+def test_only_unseen_towers_are_passed_to_dynamic_planner(monkeypatch):
     from motion import RouteStop
     survey, watch, clock, name = make_survey(monkeypatch)
     for n,vote in watch.votes.items():
         if n != name:
             vote.locked = '1'
     watch.views[name].conclusion = None
-    survey.primary_stops = [RouteStop(0,0,(),'A起点'),RouteStop(.5,0,(),'沿途复看'),RouteStop(1,0,(),'B近点')]
-    survey.primary_line = [(0,0),(1,0)]
+    survey.primary_stops = [RouteStop(.5,0,(),'沿途复看')]
     survey.attempts[name] = autonomous.MAX_TRIES
-    monkeypatch.setattr(autonomous,'fits_rgb_when_aimed',lambda c,*args: c.name == name)
-    monkeypatch.setattr(autonomous,'_travel',lambda x,y,a,b,*args: (abs(a-x),[(x,y),(a,b)]))
-    def no_fallback(*args):
-        raise AssertionError('主线尚未走完，不应提前去远处')
-    monkeypatch.setattr(autonomous,'nearest_observation',no_fallback)
+    calls = []
+    def planner(pose, offset, intr, pending, exhausted, references, pitch, failed):
+        calls.append(pending)
+        return Action('move', '查看未看清目标', x=.2, y=0.,
+                      final_x=.2, final_y=0., cells=tuple(pending))
+    monkeypatch.setattr(autonomous, 'nearest_observation', planner)
     survey._schedule(clock())
-    assert survey.action.kind == 'move'
-    assert survey.action.chase_to == 'primary'
-    assert survey.action.final_x == .5
-    # 已在沿途点停稳：重新累计原地观察，不直接跳到远端。
-    survey.anchor = CarPose(0,0,0)
-    survey.anchor_pitch = survey.anchor_roll = 0.
-    watch.last_pose = CarPose(.5,0,0)
-    observe(survey,clock,autonomous.STOP_HOLD_SECONDS + .3)
-    assert survey.primary_index == 2
-    assert survey.action.kind == 'wait'
+    assert calls == [[name]]
+    assert survey.action.cells == (name,)
+    assert not survey.primary_stops
 
 
 def test_primary_path_is_short_and_every_station_has_looks():
@@ -710,7 +639,7 @@ def test_pose_dropout_does_not_hide_large_translation(monkeypatch):
 
 def test_manual_confirmation_skips_later_conflicts(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    survey.update()
+    survey.action = Action('wait', '', cell=name)
     target = survey.confirmation_target()
     assert target == (name, '1')
     assert survey.confirm_current(target)
@@ -726,7 +655,7 @@ def test_manual_confirmation_skips_later_conflicts(monkeypatch):
 
 def test_manual_confirmation_rejects_stale_result(monkeypatch):
     survey, watch, clock, name = make_survey(monkeypatch)
-    survey.update()
+    survey.action = Action('wait', '', cell=name)
     target = survey.confirmation_target()
     watch.views[name].conclusion = '2'
     assert not survey.confirm_current(target)
@@ -763,7 +692,8 @@ def test_arrival_announces_stop_before_stability_and_next_action(monkeypatch, ki
     watch.stable_frames = 10
     survey.update()
     assert survey.stop_until is None
-    assert survey.action.kind == 'wait'
+    assert watch.votes[name].locked == '1'
+    assert survey.action.cell != name
     assert '停止！' in '\n'.join(survey.lines())
 
 
@@ -794,27 +724,19 @@ def test_primary_route_keeps_one_intermediate_and_one_reserve():
                for s in (stops[1], reserve))
 
 
-def test_reserve_runs_after_primary_before_fallback_and_only_once(monkeypatch):
+def test_fixed_reserve_points_are_not_visited(monkeypatch):
     from motion import RouteStop
     survey, watch, clock, name = make_survey(monkeypatch)
     for n, vote in watch.votes.items():
         if n != name:
             vote.locked = '1'
-    survey.primary_stops = [RouteStop(0,0,(),'A起点')]
+    watch.views[name].conclusion = None
     survey.reserve_stops = [RouteStop(.5,0,(),'沿途备用')]
     survey.attempts[name] = autonomous.MAX_TRIES
-    monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda c,*args: c.name == name)
-    monkeypatch.setattr(autonomous, '_travel', lambda x,y,a,b,*args: (abs(a-x), [(x,y),(a,b)]))
     survey._schedule(clock())
-    assert survey.action.kind == 'move'
-    assert survey.action.chase_to == 'reserve'
-    assert survey.action.cells == (name,)
-    watch.last_pose = CarPose(.5,0,0)
-    survey.action = None
-    survey._schedule(clock())
-    assert survey.reserve_index == 1
     assert survey.action.kind == 'blocked'
-    assert survey.route_display()['reserve_points'] == [(.5,0)]
+    assert not survey.reserve_stops
+    assert survey.route_display()['reserve_points'] == []
 
 
 def test_completed_survey_does_not_visit_reserve(monkeypatch):
@@ -827,3 +749,357 @@ def test_completed_survey_does_not_visit_reserve(monkeypatch):
     survey._schedule(clock())
     assert survey.action.kind == 'stop'
     assert survey.reserve_index == 0
+
+
+def test_parallax_failure_after_observation_skips_remaining_in_place_angles(monkeypatch):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    watch.views[name].needs_parallax = True
+    survey.look_key = (name,0)
+    survey.look_started = 0.
+    assert survey._expire_look(autonomous.LOOK_SECONDS+1)
+    assert survey.attempts[name] == autonomous.MAX_TRIES
+    assert survey.look_key is None
+
+
+@pytest.mark.parametrize('flag', ['in_view', 'needs_yaw', 'needs_pitch', 'skip_vote'])
+def test_invalid_view_is_not_assumed_identified(monkeypatch, flag):
+    survey, watch, clock, name = make_survey(monkeypatch)
+    setattr(watch.views[name], flag, flag != 'in_view')
+    survey.update()
+    assert watch.votes[name].locked is None
+    assert name in survey.snapshot()['pending']
+
+
+def test_same_frame_records_all_visible_results_and_stops(monkeypatch):
+    from dataclasses import replace
+    survey, watch, clock, name = make_survey(monkeypatch)
+    for n in DISPLAY:
+        watch.views[n] = replace(watch.views[name], conclusion='0')
+    survey.update()
+    assert all(v.locked == '0' for v in watch.votes.values())
+    assert survey.complete
+    assert survey.action.kind == 'stop'
+    assert survey.snapshot()['pending'] == []
+    assert all(len(items) == 1 for items in survey.history.values())
+
+
+def test_map_preview_adds_only_points_for_previously_unseen_towers():
+    import motion
+    from car_pose import body_center
+    pose = CarPose(0,0,0)
+    stops, line = motion.survey(pose, np.zeros(2), load_intrinsics('config/intrinsics.yaml'))
+    assert (stops[0].x,stops[0].y) == (pose.x,pose.y)
+    observed = {look.number for look in stops[0].looks}
+    assert len(stops) > 1
+    for stop in stops[1:]:
+        assert stop.looks
+        assert len({(look.yaw_deg,look.pitch_deg) for look in stop.looks}) == 1
+        fresh = {look.number for look in stop.looks}
+        assert not fresh & observed
+        observed.update(fresh)
+        assert math.dist(body_center(pose),body_center(CarPose(stop.x,stop.y,math.radians(stop.looks[0].yaw_deg)))) >= .30-1e-6
+    assert observed | {motion.TOWER_NO[n] for n in stops.unobserved} == set('123456')
+    assert not stops.reserve
+
+
+@pytest.mark.parametrize('case, expected', [('visible', 'wait'), ('yaw_only', 'yaw'), ('pitch_only', 'pitch')])
+def test_joint_candidates_can_change_yaw_and_pitch_together(monkeypatch, case, expected):
+    import motion
+    survey, watch, clock, name = make_survey(monkeypatch)
+    monkeypatch.setattr(survey, '_targets', AutonomousSurvey._targets.__get__(survey))
+    monkeypatch.setattr(autonomous, '_aim_cell', motion._aim_cell)
+    monkeypatch.setattr(motion, '_parking_clear', lambda *args: True)
+    view = watch.views[name]
+    view.conclusion = None
+    view.bearing_deg = 18.
+    view.pitch_target_deg = 20.
+    if case == 'visible':
+        sees = lambda *args: True
+    elif case == 'yaw_only':
+        view.in_view, view.needs_yaw = False, True
+        view.bearing_deg = 60.
+        watch.pitch = 5.
+        sees = lambda c,p,o,pi,i: math.degrees(p.yaw) < -30.
+    else:
+        view.in_view, view.needs_pitch = False, True
+        sees = lambda c,p,o,pi,i: pi >= 12.
+    monkeypatch.setattr(autonomous, '_sees', sees)
+    monkeypatch.setattr(motion, '_sees', sees)
+    action = survey._aim(name)
+    assert action.kind == expected
+    if case == 'visible':
+        assert math.isclose(action.yaw, watch.last_pose.yaw, abs_tol=1e-9)
+        assert action.pitch == watch.pitch
+    if case == 'yaw_only':
+        assert action.pitch != watch.pitch
+    if case == 'pitch_only':
+        assert action.pitch == 12.
+    # 候选和绝对目标固定；实时角度变化不重新排序或回到已尝试的档。
+    targets = survey._targets(name)
+    watch.pitch += 1.
+    assert survey._targets(name) == targets
+    assert len(targets) == len(set(targets))
+
+
+def test_scheduler_does_not_charge_yaw_and_pitch_as_two_observations(monkeypatch):
+    survey, watch, clock, first = make_survey(monkeypatch)
+    second = DISPLAY[1]
+    watch.views[first].conclusion = None
+    watch.views[second] = CellView(None, True, False, False, False, 0., 0., 0., 255.)
+    monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda c,*args: c.name in (first, second))
+    monkeypatch.setattr(autonomous, '_sees', lambda *args: True)
+    def aim(n):
+        if n == first:
+            return Action('yaw', '', yaw=math.radians(4.), pitch=10., cell=n)
+        return Action('yaw', '', yaw=math.radians(15.), pitch=watch.pitch, cell=n)
+    monkeypatch.setattr(survey, '_aim', aim)
+    survey._schedule(clock())
+    assert survey.action.cell == first
+
+
+def test_timeout_advances_reordered_candidates_without_repeating(monkeypatch):
+    import motion
+    survey, watch, clock, name = make_survey(monkeypatch)
+    monkeypatch.setattr(survey, '_targets', AutonomousSurvey._targets.__get__(survey))
+    monkeypatch.setattr(autonomous, '_aim_cell', motion._aim_cell)
+    monkeypatch.setattr(autonomous, '_sees', lambda *args: True)
+    monkeypatch.setattr(motion, '_sees', lambda *args: True)
+    monkeypatch.setattr(motion, '_parking_clear', lambda *args: True)
+    watch.views[name].conclusion = None
+    survey._schedule(clock())
+    targets = survey._targets(name)
+    assert survey.action.kind == 'wait'
+    clock.now += autonomous.NO_PROGRESS_SECONDS+1
+    assert survey._expire_look(clock())
+    assert survey.attempts[name] == 1
+    action = survey._aim(name)
+    assert action.attempt >= 1
+    assert targets[action.attempt] != targets[0]
+
+
+
+def test_scheduler_shares_a_pose_when_adjustment_costs_match(monkeypatch):
+    survey, watch, clock, first = make_survey(monkeypatch)
+    second = DISPLAY[1]
+    watch.views[first].conclusion = None
+    watch.views[second] = CellView(None, True, False, False, False, 0., 0., 0., 255.)
+    monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda c,*args: c.name in (first, second))
+    monkeypatch.setattr(autonomous, '_sees', lambda c,p,*args: p.yaw < 0 or c.name == first)
+    monkeypatch.setattr(survey, '_aim', lambda n: Action('yaw', '', cell=n, pitch=0.,
+                         yaw=math.radians(10. if n == first else -10.)))
+    survey._schedule(clock())
+    assert survey.action.cell == second
+
+
+def test_relocation_treats_pitch_change_as_part_of_same_observation(monkeypatch):
+    import motion
+    monkeypatch.setattr(motion, '_distances', lambda *args: [])
+    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,*args: abs(y) < 1e-8 and .09 < x < .21)
+    monkeypatch.setattr(motion, '_ground_blocked', lambda *args: False)
+    monkeypatch.setattr(motion, '_bypass_points', lambda *args: [])
+    monkeypatch.setattr(motion, '_travel', lambda x,y,a,b,*args: (math.hypot(a-x,b-y), [(x,y),(a,b)]))
+    monkeypatch.setattr(motion, 'observation_poses', lambda c,p,*args: iter([(0,p,0. if p.x < .15 else 20.)]))
+    pose = CarPose(0,0,0)
+    first = motion.nearest_observation(pose, np.zeros(2), None, [DISPLAY[0]], pitch=0.)
+    second = motion.nearest_observation(pose, np.zeros(2), None, [DISPLAY[0]], pitch=20.)
+    assert math.isclose(first.final_x, .1)
+    assert math.isclose(second.final_x, .1)
+    assert second.observation_pitch == 0.
+
+
+
+def test_joint_goal_moves_turns_and_tilts_before_one_shared_observation(monkeypatch):
+    from car_pose import turned_pose
+    from report import FieldWatch
+    survey, watch, clock, first = make_survey(monkeypatch)
+    second = DISPLAY[1]
+    for n,v in watch.votes.items():
+        if n not in (first, second):
+            v.locked = '1'
+    watch.views[first].conclusion = None
+    watch.views[second] = CellView(None, True, False, False, False, 0., 0., 0., 255.)
+    watch._arrived = lambda action: FieldWatch._arrived(watch, action)
+    target = turned_pose(CarPose(.4,.4,0), math.radians(30.))
+    goal = Action('move', '', x=.4, y=.4, final_x=.4, final_y=.4, cells=(first,second),
+                  observation_x=target.x, observation_y=target.y,
+                  observation_yaw=target.yaw, observation_pitch=12.)
+    monkeypatch.setattr(autonomous, 'nearest_observation', lambda *args: goal)
+    monkeypatch.setattr(autonomous, '_travel', lambda x,y,a,b,*args: (math.hypot(a-x,b-y),[(x,y),(a,b)]))
+    monkeypatch.setattr(autonomous, '_bypass_points', lambda *args: [])
+    survey._schedule(clock())
+    assert survey.action.kind == 'move'
+    assert survey.metrics()['observation_count'] == 0
+    watch.last_pose = CarPose(survey.action.x, survey.action.y, 0.)
+    watch.views[first].conclusion = '1'
+    survey.update()
+    clock.now += 1.1
+    survey.update()
+    assert survey.action.kind == 'yaw'
+    assert watch.votes[first].locked is None
+    assert survey.metrics()['observation_count'] == 0
+    watch.last_pose = turned_pose(watch.last_pose, target.yaw)
+    survey.update()
+    clock.now += 1.1
+    survey.update()
+    assert survey.action.kind == 'pitch'
+    assert survey.metrics()['observation_count'] == 0
+    # 原地转身会改变右前角坐标，但不能被误判为还需重新移动。
+    watch.pitch = 12.
+    survey.update()
+    clock.now += 1.1
+    watch.views[first].conclusion = watch.views[second].conclusion = '1'
+    survey.update()
+    assert survey.complete
+    assert survey.action.kind == 'stop'
+    assert survey.metrics()['observation_count'] == 1
+    assert set(survey.observations[0]['cells']) == {first,second}
+    assert survey.observation_goal is None
+
+
+def test_common_coverage_does_not_union_incompatible_headings(monkeypatch):
+    import motion
+    names = list(DISPLAY[:2])
+    monkeypatch.setattr(motion, '_distances', lambda *args: [])
+    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,*args: x == 0 and y == 0)
+    monkeypatch.setattr(motion, '_ground_blocked', lambda *args: False)
+    monkeypatch.setattr(motion, '_bypass_points', lambda *args: [])
+    def profiles(cell,p,*args):
+        yaw = 0. if cell.name == names[0] else math.pi/2
+        return iter([(0,CarPose(p.x,p.y,yaw),0.)])
+    monkeypatch.setattr(motion, 'observation_poses', profiles)
+    action = motion.nearest_observation(CarPose(0,0,0), np.zeros(2), None, names)
+    assert len(action.cells) == 1
+
+
+def test_failed_joint_posture_is_not_selected_again(monkeypatch):
+    import motion
+    name = DISPLAY[0]
+    monkeypatch.setattr(motion, '_distances', lambda *args: [])
+    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,*args: x == 0 and y == 0)
+    monkeypatch.setattr(motion, '_ground_blocked', lambda *args: False)
+    monkeypatch.setattr(motion, '_bypass_points', lambda *args: [])
+    monkeypatch.setattr(motion, 'observation_poses', lambda c,p,*args: iter([(0,p,0.)]))
+    failed = [dict(cells=[name], x=0., y=0., yaw_deg=0., pitch_deg=0.)]
+    action = motion.nearest_observation(CarPose(0,0,0), np.zeros(2), None, [name], failed=failed)
+    assert action.kind == 'blocked'
+
+
+def test_joint_search_selects_moving_rotated_tilted_pose_for_shared_coverage(monkeypatch):
+    import motion
+    from car_pose import turned_pose
+    names = list(DISPLAY[:2])
+    monkeypatch.setattr(motion, '_distances', lambda *args: [])
+    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,*args: abs(y) < 1e-8 and .09 < x < .21)
+    monkeypatch.setattr(motion, '_ground_blocked', lambda *args: False)
+    monkeypatch.setattr(motion, '_bypass_points', lambda *args: [])
+    monkeypatch.setattr(motion, '_travel', lambda x,y,a,b,*args: (math.hypot(a-x,b-y),[(x,y),(a,b)]))
+    def profiles(cell,p,*args):
+        if p.x < .15:
+            return iter([(0,p,0.)]) if cell.name == names[0] else iter(())
+        return iter([(0,turned_pose(p,math.radians(30.)),12.)])
+    monkeypatch.setattr(motion, 'observation_poses', profiles)
+    action = motion.nearest_observation(CarPose(0,0,0), np.zeros(2), None, names)
+    assert math.isclose(action.final_x, .2)
+    assert set(action.cells) == set(names)
+    assert math.isclose(action.observation_yaw, math.radians(30.))
+    assert action.observation_pitch == 12.
+
+
+
+def test_camera_panel_shows_joint_goal_instead_of_obsolete_pitch_checks(monkeypatch):
+    from view_field import live_panels
+    survey, watch, clock, name = make_survey(monkeypatch)
+    watch.autonomy = survey
+    survey.action = Action('pitch', '', cell=name, yaw=.5, pitch=12.)
+    survey.observation_goal = Action('wait', '', cells=(name,), observation_x=.4, observation_y=.5,
+                                     observation_yaw=.5, observation_pitch=12.)
+    panels = live_panels(watch, watch.last_pose, 'static')
+    text = '\n'.join(panels['left']+panels['bottom'])
+    assert '本次联合观测' in text
+    assert '抬头到 12 度' in text
+    assert '只计一次观测' in text
+    assert '俯仰复核' not in text
+    assert '两档' not in text and '三档' not in text
+
+
+
+def test_default_survey_only_requests_new_points_for_unobserved_targets(monkeypatch):
+    from car_pose import turned_pose
+    _, watch, clock, first = make_survey(monkeypatch)
+    second = DISPLAY[1]
+    for n,v in watch.votes.items():
+        if n not in (first,second):
+            v.locked = '1'
+    watch.views[second] = CellView(None,False,True,False,False,0.,0.,0.,255.)
+    survey = AutonomousSurvey(watch,clock)
+    monkeypatch.setattr(survey, '_aim', lambda n: pytest.fail('默认流程不得原地逐档扫描'))
+    calls = []
+    target = turned_pose(CarPose(.5,0.,0.),math.radians(30.))
+    def plan(*args):
+        calls.append(args)
+        return Action('move', '', cells=(second,), observation_x=target.x, observation_y=target.y,
+                      observation_yaw=target.yaw, observation_pitch=12.)
+    monkeypatch.setattr(autonomous, 'nearest_observation', plan)
+    monkeypatch.setattr(autonomous, '_travel', lambda x,y,a,b,*args: (math.hypot(a-x,b-y),[(x,y),(a,b)]))
+    monkeypatch.setattr(autonomous, '_bypass_points', lambda *args: [])
+    survey.update()
+    assert watch.votes[first].locked == '1'
+    assert calls[0][3] == [second]
+    assert calls[0][-2] is True
+    assert calls[0][-1]  # 排除初始点和已观测位置。
+    assert survey.action.kind == 'move'
+    assert survey.observation_goal.cells == (second,)
+    assert survey.route_display()['kinds'] == ['初始点','补充点']
+
+
+def test_default_survey_does_not_fall_back_to_many_angles_when_blocked(monkeypatch):
+    _, watch, clock, name = make_survey(monkeypatch)
+    watch.views[name].conclusion = None
+    survey = AutonomousSurvey(watch,clock)
+    monkeypatch.setattr(survey, '_aim', lambda n: pytest.fail('无补充点时不得改为逐档扫描'))
+    survey.update()
+    assert survey.action.kind == 'blocked'
+    assert survey.look_key is None
+    assert survey.observation_goal is None
+
+
+
+def test_default_point_times_out_without_long_stationary_scan(monkeypatch):
+    _, watch, clock, name = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    watch.views[name].conclusion = None
+    survey.observation_goal = Action('wait', '', cells=(name,), observation_x=0., observation_y=0.,
+                                    observation_yaw=0., observation_pitch=0.)
+    survey.look_key, survey.look_started = (name,0), clock()
+    assert not survey._expire_look(autonomous.POINT_LOOK_SECONDS-.1)
+    assert survey._expire_look(autonomous.POINT_LOOK_SECONDS+.1)
+    assert survey.observation_goal is None
+    assert len(survey.failed_observations) == 1
+
+
+def test_default_skips_new_unreliable_view_without_changing_confirmed_memory(monkeypatch):
+    _,watch,clock,name = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    monkeypatch.setattr(autonomous,'_observation_preferences',
+                        lambda *args:{n:(False,1.,.7,0.) for n in DISPLAY})
+    survey.update()
+    assert watch.votes[name].locked is None
+    watch.votes[name].locked = '2'
+    survey.update()
+    assert watch.votes[name].locked == '2'
+
+
+def test_explicit_fallback_goal_can_use_its_own_result(monkeypatch):
+    _,watch,clock,name = make_survey(monkeypatch)
+    for n,v in watch.votes.items():
+        if n != name:
+            v.locked = '1'
+    survey = AutonomousSurvey(watch,clock)
+    monkeypatch.setattr(autonomous,'_observation_preferences',
+                        lambda *args:{n:(False,1.,.7,0.) for n in DISPLAY})
+    survey.observation_goal = Action('wait','',cells=(name,),observation_x=0.,observation_y=0.,
+        observation_yaw=0.,observation_pitch=0.,observation_fallback=True)
+    survey.update()
+    assert watch.votes[name].locked == '1'
+    assert survey.complete

@@ -144,7 +144,7 @@ def can_pose_text(pose: CarPose | None, source: str) -> str:
 
 def live_panels(watch, pose, source, extras=()):
     """窗口三分区：操作目标/定位、结果、其余状态。"""
-    from motion import GOAL_BEARING, MAX_TRIES, heading_words, format_pitch
+    from motion import heading_words, format_pitch
     left = [can_pose_text(pose, source), f"当前相机：{format_pitch(watch.pitch)}"]
     right = ["识别结果"]
     words = {'0': '空', '1': '一层', '2': '两层', '红': '红顶', '蓝': '蓝顶'}
@@ -159,32 +159,32 @@ def live_panels(watch, pose, source, extras=()):
     if survey is not None and getattr(survey, 'stop_until', None) is not None:
         left.append(survey.stop_message)
         action = None
-    if action is not None and action.cell and action.kind != 'move':
-        view = watch.views[action.cell]
-        center = survey.heading_center(action.cell)
-        headings = [heading_words(center+d) for d in dict.fromkeys(GOAL_BEARING)]
-        left += [f"当前点：观察{TOWER_NO[action.cell]}号 · 第{action.attempt+1}/{MAX_TRIES}档",
-                 '车头朝向：' + ' / '.join(headings[:4]),
-                 '                 ' + ' / '.join(headings[4:]),
-                 '相机俯仰：' + ' / '.join(format_pitch(view.pitch_target_deg+d) for d in (0.,8.,-8.))]
-        from motion import PITCH_OFFSET
+    goal = getattr(survey, 'observation_goal', None)
+    if goal is not None:
+        left += [f"本次联合观测：x={goal.observation_x:+.2f}m y={goal.observation_y:+.2f}m",
+                 f"车头朝向：{heading_words(np.degrees(goal.observation_yaw))}",
+                 f"相机俯仰：{format_pitch(goal.observation_pitch)}",
+                 '共同观察：' + '、'.join(str(TOWER_NO[n])+'号' for n in goal.cells),
+                 '移动、转向和俯仰全部到位停稳后，只计一次观测']
+        if goal.observation_fallback:
+            left.append("中距离分离视角不足，当前为兜底视角")
+    elif action is not None and action.cell and action.kind != 'move':
         yaw = action.yaw if action.yaw is not None else pose.yaw
-        target_pitch = view.pitch_target_deg + PITCH_OFFSET[action.attempt]
-        left.append(f"本档目标：{heading_words(np.degrees(yaw))} · {format_pitch(target_pitch)}")
-        required = survey.required_checks(action.cell) if hasattr(survey,'required_checks') else 2
-        left.append(f"俯仰复核：{len(survey.pitch_checks[action.cell])}/{required}档" )
+        pitch = action.pitch if action.pitch is not None else watch.pitch
+        left += [f"当前观察：{TOWER_NO[action.cell]}号",
+                 f"车头朝向：{heading_words(np.degrees(yaw))}",
+                 f"相机俯仰：{format_pitch(pitch)}",
+                 '有效识别即记住，仅未知时继续换视角']
     elif action is not None and action.kind == 'move':
         left.append(f"下一点：x={action.x:+.2f}m y={action.y:+.2f}m")
     else:
         left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
     route_hint = []
-    if survey is not None and getattr(survey,'primary_stops',None):
-        route_hint = [f"主线 A→一个沿途点→B近点（{min(survey.primary_index,len(survey.primary_stops))}/{len(survey.primary_stops)}）；未完成时再启用沿途备用点"]
     if survey is not None:
         metrics = survey.metrics()
         route_hint.append(f"本轮观测 {metrics['observation_count']} 次 · 累计路程 {metrics['distance_m']:.3f} 米")
     bottom = route_hint + ([survey.message] if survey is not None else []) + list(extras)
-    bottom += ["朝向以场地前方为0°；近处两档、远处三档一致才确认；主线看够再去兜底",
+    bottom += ["朝向以场地前方为0°；完整位置/朝向/俯仰计一次观测；已识别塔不复测",
                "1–5 光线 | d 诊断 | n 切换塔 | s 保存 | q 退出"]
     return dict(left=left, right=right, bottom=bottom)
 
@@ -208,9 +208,10 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
                     cv2.rectangle(board, (x, y), (x + width - 1, y + height - 1), bgr, 2)
                     tags.append((max(0, x), max(0, y - 24),
                                  f"{TOWER_NO[name]} 搜索框", bgr))
-            if view.piece is not None:
-                cv2.drawContours(board, [view.piece], -1, bgr, 2, cv2.LINE_AA)
             measure = getattr(view, "measurements", None) or {}
+            display_piece = measure.get('display_piece',view.piece)
+            if display_piece is not None:
+                cv2.drawContours(board, [display_piece], -1, bgr, 2, cv2.LINE_AA)
             white_piece = measure.get('white_piece')
             if view.method == 'RGB顶块' and white_piece is not None:
                 cv2.drawContours(board, [white_piece], -1, (255, 0, 255), 2, cv2.LINE_AA)
@@ -234,7 +235,7 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
                     f"{TOWER_NO[name]} 深度取样 {height:.1f}cm",
                     (255,0,255),
                 ))
-            anchor = view.piece if view.piece is not None else view.region
+            anchor = display_piece if display_piece is not None else view.region
             if anchor is None:
                 continue
             u, v = _anchor(anchor)
@@ -589,7 +590,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 args.autonomous_map_lines = [watch.autonomy.message,
                     "已确认塔：" + ('、'.join(confirmed) or '无'),
                     "待测塔：" + ('、'.join(pending_towers) or '无；测量完成'),
-                    "A→一个沿途点→B；未完成→备用点→兜底"]
+                    "只前往能看到未观测塔的补充点；每点一组朝向和俯仰"]
                 if time.monotonic() - report_saved_at >= 1.0:
                     try:
                         watch.autonomy.save(args.survey_report)

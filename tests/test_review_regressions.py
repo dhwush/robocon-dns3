@@ -26,11 +26,11 @@ def test_intermediate_height_is_not_two_layers():
     cell,pose,c,d=scene(top=.50)
     assert inspect_frame(pose,OFFSET,-8.,INTR,c,d)[cell.name].conclusion is None
 
-def test_cap_noise_cannot_override_blue():
+def test_single_blue_side_with_red_noise_cannot_decide_faction():
     c=np.zeros((720,1280,3),np.uint8); w=np.zeros((720,1280),np.uint8)
     w[400:600,500:700]=255; c[350:400,500:700]=(255,0,0)
     c[349,500:530]=(0,0,255)
-    assert _faction(c,w,np.full(w.shape,255,np.uint8),2.,INTR)==('蓝',False)
+    assert _faction(c,w,np.full(w.shape,255,np.uint8),2.,INTR)==(None,False)
 
 def test_pose_requires_same_clock_and_fresh_sample():
     poses=[CarPose(0,0,0,1000),CarPose(1,0,0,1001)]

@@ -49,3 +49,39 @@ def test_near_waypoint_does_not_skip_blocked_segment():
 
 def test_unreachable_fallback_does_not_import_missing_module():
     assert _fallback(CarPose(0,0,0),[],[]).kind == 'blocked'
+
+
+def test_confirmed_corridor_limits_apply_to_parking_and_whole_paths():
+    assert _parking_clear(-4.,1.4)
+    assert not _parking_clear(-4.,2.05)
+    assert _parking_clear(4.,4.)
+    assert not _parking_clear(4.,4.7)
+    assert not _parking_clear(0.,6.5)
+    assert not _path_clear(-4.,1.4,-4.,2.05)
+    assert not _path_clear(4.,4.,4.,4.7)
+    assert _travel(-4.,1.4,-4.,2.05,_bypass_points()) is None
+
+
+def test_corridor_limits_have_no_infinite_waypoints_or_outer_detour():
+    extras = _bypass_points()
+    assert all(math.isfinite(value) for point in extras for value in point)
+    assert _travel(-20.,0.,-20.,3.,extras) is None
+    assert _travel(20.,0.,20.,5.,extras) is None
+    trip = _travel(-4.,1.4,4.,4.,extras)
+    assert trip is not None
+    assert all(_path_clear(*a,*b) for a,b in zip(trip[1],trip[1][1:]))
+
+
+def test_supplementary_stop_order_avoids_far_then_near_backtracking():
+    from motion import _order_supplementary_stops,RouteStops,RouteStop,Look
+    initial = RouteStop(0.,0.,(Look('2',0.,0.),),'初始点')
+    far = RouteStop(4.,0.,(Look('4',0.,0.),),'补充点1')
+    near = RouteStop(1.,0.,(Look('1',0.,0.),),'补充点2')
+    original = RouteStops([initial,far,near],observed=('known',),unobserved=('missing',))
+    ordered,line = _order_supplementary_stops(original,[(0.,0.),(4.,0.),(1.,0.)])
+    assert [stop.x for stop in ordered] == [0.,1.,4.]
+    assert ordered[1].looks == near.looks
+    assert ordered[2].looks == far.looks
+    assert ordered.observed == original.observed
+    assert ordered.unobserved == original.unobserved
+    assert sum(math.dist(a,b) for a,b in zip(line,line[1:])) == 4.

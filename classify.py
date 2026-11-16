@@ -24,14 +24,14 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from car_pose import CAMERA_HEIGHT_M, CarPose, Intrinsics, bearing_deg, camera_frame, project, to_camera
+from car_pose import CAMERA_HEIGHT_M, CarPose, Intrinsics, bearing_deg, camera_frame, camera_position, project, to_camera
 from field_map import MARGIN_M, Cell, tower_cells
 from sight import sees, visible_height
 
 
 # 白盒阴影保留到 V=105，减少为补亮白盒而把顶块曝白的需要。
 # 红保持窄色相，允许高亮时饱和度降到120；尺寸/高度/两色关系仍需通过。
-# 蓝的色相仍是 105–130，饱和度放到 110，罩住这张画面里大约 113 的蓝。
+# 蓝的色相仍是105–130，饱和度下限80保留偏淡的塔顶蓝面。
 WHITE_S = 110
 WHITE_V = 105
 # 黄地面色相大约 16，亮处大约 12–19，饱和度大约 49，明度大约 135。
@@ -41,7 +41,8 @@ FLOOR_H = (10, 26)
 FLOOR_S = 48
 RED = ((0, 120, 110), (8, 255, 255))
 RED_WRAP = ((172, 120, 110), (180, 255, 255))
-BLUE = ((105, 110, 50), (130, 255, 255))
+# 保留偏淡的塔顶蓝面，仅放宽饱和度；排除偏青/偏紫背景。
+BLUE = ((105, 80, 50), (130, 255, 255))
 
 WIDTH_M = 0.35
 # 搜索框宽 60 cm。白块铺满框时，按格子中心的距离会量到 60 cm 出头。收到 65 cm，两块并排的 70 cm 仍然不要。
@@ -132,15 +133,12 @@ def _bearing_deg(point: np.ndarray, pose: CarPose, offset: np.ndarray, pitch: fl
 
 
 def _pitch_target(cell: Cell, pose: CarPose, offset: np.ndarray) -> float:
-    # 一层顶到塔顶的中点，抬到相对水平的角度。这是要转到的角度。
-    # 不把台面算进去。近处台面到塔顶整段对不齐彩色的垂直视场。
-    origin_z = CAMERA_HEIGHT_M
-    mid = cell.center((cell.one_z + cell.cap_z) / 2.0)
-    flat = np.array([mid[0], mid[1], origin_z], dtype=float)
-    cam = to_camera(mid, pose, offset, 0.0)
-    ahead = to_camera(flat, pose, offset, 0.0)
-    horizontal = float(np.hypot(ahead[0], ahead[2]))
-    return float(np.degrees(np.arctan2(mid[2] - origin_z, max(horizontal, 1e-6))))
+    # 角度中点而非高度中点；近处上下仰角不对称，需按真实视线对中。
+    origin = camera_position(pose, offset, 0.)
+    horizontal = max(float(np.linalg.norm(cell.center(cell.one_z)[:2]-origin[:2])), 1e-6)
+    low = np.arctan2(cell.one_z-origin[2], horizontal)
+    high = np.arctan2(cell.cap_z-origin[2], horizontal)
+    return float(np.degrees((low+high)/2))
 
 
 def _mask(cell: Cell, pose: CarPose, offset: np.ndarray, pitch: float, intr: Intrinsics, roll: float = 0.0) -> np.ndarray:
@@ -234,6 +232,147 @@ def _band_above(white: np.ndarray, cell_mask: np.ndarray, cap_px: int) -> tuple[
     return band, tops
 
 
+def _cap_colors(color, diagnostic=None, possible=False):
+    """顶块路径共用阈值与归属掩膜，避免旧分支再次使用其他塔的颜色。"""
+    hsv=cv2.cvtColor(color,cv2.COLOR_BGR2HSV)
+    red=((cv2.inRange(hsv,np.array(RED[0]),np.array(RED[1]))
+          |cv2.inRange(hsv,np.array(RED_WRAP[0]),np.array(RED_WRAP[1])))>0)
+    blue=cv2.inRange(hsv,np.array(BLUE[0]),np.array(BLUE[1]))>0
+    allowed=(diagnostic or {}).get('_cap_suspected_allowed' if possible else '_cap_allowed')
+    if allowed is not None:
+        red &= allowed
+        blue &= allowed
+    return red,blue
+
+
+def _cap_world_support(part, colored, depth, x, y, pose, offset, pitch, intr, roll):
+    """只使用颜色块内部成片一致的实测深度；缺测和零星深度不冒充归属。"""
+    if depth is None or depth.shape != colored.shape:
+        return None
+    inner=cv2.erode(part.astype(np.uint8),np.ones((3,3),np.uint8),
+                    borderType=cv2.BORDER_CONSTANT,borderValue=0)>0
+    yy,xx=np.nonzero(inner & colored[y:y+part.shape[0],x:x+part.shape[1]])
+    if len(xx)<12:
+        return None
+    values=depth[y+yy,x+xx].astype(float)
+    valid=np.isfinite(values)&(values>=_DEPTH_NEAR_M)&(values<=6.)
+    if valid.sum()<12 or valid.mean()<.25:
+        return None
+    yy,xx,values=yy[valid]+y,xx[valid]+x,values[valid]
+    middle=float(np.median(values))
+    same=np.abs(values-middle)<=max(.05,.025*middle)
+    if same.sum()<12 or same.mean()<.7:
+        return None
+    yy,xx,values=yy[same],xx[same],values[same]
+    if len(xx)>4000:
+        take=np.linspace(0,len(xx)-1,4000).astype(int)
+        yy,xx,values=yy[take],xx[take],values[take]
+    origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+    world=(origin+((xx-intr.cx)*values/intr.fx)[:,None]*right
+           +((yy-intr.cy)*values/intr.fy)[:,None]*down+values[:,None]*ahead)
+    return world,middle
+
+
+def _assign_caps(cells, color, pose, offset, pitch, intr, roll=0., depth=None):
+    """整帧顶块唯一归属：成片实测深度优先，缺测时用RGB塔顶投影。"""
+    red, blue = _cap_colors(color)
+    colored=red | blue
+    # 统一闭合半径，确保各塔使用同一颜色块身份。
+    closed = cv2.morphologyEx(colored.astype(np.uint8), cv2.MORPH_CLOSE,
+                             np.ones((7, 7), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
+    owners = np.full(count, -1, np.int32)
+    possible = np.zeros((len(cells), count), bool)
+    reports = {cell.name: [] for cell in cells}
+    masks = [_mask(cell, pose, offset, pitch, intr, roll) for cell in cells]
+    for index in range(1, count):
+        x, y, w, h, pixels = map(int, stats[index])
+        if pixels < 12:
+            continue
+        part = labels[y:y+h, x:x+w] == index
+        support=_cap_world_support(part,colored,depth,x,y,pose,offset,pitch,intr,roll)
+        depth_status='missing_or_incoherent'
+        if support is not None:
+            world,_=support
+            matched=False
+            for candidate_cell in cells:
+                bx0,bx1,by0,by1=candidate_cell.search_bounds(MARGIN_M)
+                near=((world[:,0]>=bx0)&(world[:,0]<=bx1)&(world[:,1]>=by0)&(world[:,1]<=by1)
+                      &(world[:,2]>=candidate_cell.two_z-.08)&(world[:,2]<=candidate_cell.cap_z+.10))
+                if np.mean(near)>=.6:
+                    matched=True
+                    break
+            depth_status='matched_tower' if matched else 'outside_all_tower_volumes'
+            # 穿透到背景或坐标不一致的深度不作归属依据；不凭它否决独立RGB。
+            if not matched:
+                support=None
+        paired=(np.count_nonzero(red[y:y+h,x:x+w]&part)>=8
+                and np.count_nonzero(blue[y:y+h,x:x+w]&part)>=8)
+        scores = []
+        details = []
+        for number, (cell, mask) in enumerate(zip(cells, masks)):
+            coverage = float(np.count_nonzero(part & (mask[y:y+h, x:x+w] > 0)) / pixels)
+            if coverage < .35:
+                continue
+            distance = float(to_camera(cell.center(cell.two_z), pose, offset, pitch, roll)[2])
+            if distance <= .2:
+                continue
+            bottom = _z_at_cell(cell, x+w/2, y+h, pose, offset, pitch, intr, roll)
+            top = _z_at_cell(cell, x+w/2, y, pose, offset, pitch, intr, roll)
+            errors = []
+            if bottom is not None and y+h < intr.height-1:
+                errors.append(abs(bottom-cell.two_z))
+            if top is not None and y > 1:
+                errors.append(abs(top-cell.cap_z))
+            detail = dict(component=index, bbox=[x,y,w,h], coverage=coverage,
+                          bottom_cm=None if bottom is None else bottom*100,
+                          top_cm=None if top is None else top*100,
+                          owner=None, source='depth' if support is not None else 'rgb',
+                          depth_status=depth_status, reason='顶块位置与塔位不匹配')
+            reports[cell.name].append(detail)
+            details.append(detail)
+            if support is not None:
+                world,measured_distance=support
+                x0,x1,y0,y1=cell.search_bounds(MARGIN_M)
+                own=((world[:,0]>=x0)&(world[:,0]<=x1)
+                     &(world[:,1]>=y0)&(world[:,1]<=y1)
+                     &(world[:,2]>=cell.two_z-.08)&(world[:,2]<=cell.cap_z+.10))
+                fraction=float(np.mean(own))
+                detail.update(depth_points=len(world),depth_distance_m=measured_distance,
+                              depth_coverage=fraction,world_center=np.median(world,axis=0).tolist())
+                if fraction<.6:
+                    detail['reason']='实测顶块不在本塔水平范围或顶块高度带'
+                    continue
+                score=float(np.linalg.norm(np.median(world[own,:2],axis=0)-[cell.x,cell.y]))
+            else:
+                # 不恢复完整尺寸要求；出画边不作高度证据，局部可见保留容差。
+                if not errors or max(errors) > .18:
+                    continue
+                # 单色碎片只有贴近白盒顶才保留占用证据；不要求露出完整20cm。
+                if (not paired and bottom is not None and y+h<intr.height-1
+                        and abs(bottom-cell.two_z)>.115):
+                    detail['reason']='单色区域没有贴近本塔白盒顶'
+                    continue
+                score = float(np.mean(errors))
+            possible[number, index] = True
+            detail['height_error_cm'] = None if not errors else float(np.mean(errors))*100
+            detail['ownership_score_m']=score
+            scores.append((score, number))
+        scores.sort()
+        owner = None
+        if scores and (len(scores) == 1 or scores[1][0]-scores[0][0] >= .04):
+            owners[index] = scores[0][1]
+            owner = cells[scores[0][1]].name
+        for detail in details:
+            detail['owner'] = owner
+            if 'ownership_score_m' in detail:
+                detail['reason'] = '唯一归属' if owner else '塔位证据接近，归属未定'
+    return {cell.name: (owners[labels] == number,
+                       (owners[labels] == number) | ((owners[labels] < 0) & possible[number, labels]),
+                       reports[cell.name])
+            for number, cell in enumerate(cells)}
+
+
 def _faction(color: np.ndarray, white: np.ndarray, cell_mask: np.ndarray, z_cam: float, intr: Intrinsics, diagnostic: dict | None = None, linked_cap: bool = False) -> tuple[str | None, bool]:
     # 只认贴着白盒顶边的那条像素带，从上往下数。
     # 和顶边隔开的红蓝不算塔顶。红蓝从上面一起数够，第二项为真，调用处保持未知。
@@ -262,12 +401,9 @@ def _faction(color: np.ndarray, white: np.ndarray, cell_mask: np.ndarray, z_cam:
                          status="带内没有红蓝像素")
     if not np.any(band):
         return None, False
-    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
-    red = (
-        (cv2.inRange(hsv, np.array(RED[0], dtype=np.uint8), np.array(RED[1], dtype=np.uint8)) > 0)
-        | (cv2.inRange(hsv, np.array(RED_WRAP[0], dtype=np.uint8), np.array(RED_WRAP[1], dtype=np.uint8)) > 0)
-    ) & band
-    blue = (cv2.inRange(hsv, np.array(BLUE[0], dtype=np.uint8), np.array(BLUE[1], dtype=np.uint8)) > 0) & band
+    red,blue=_cap_colors(color,diagnostic,possible=True)
+    red &= band
+    blue &= band
     colored = red | blue
     if debug is not None:
         debug["raw_red_pixels"] = int(red.sum())
@@ -303,27 +439,31 @@ def _faction(color: np.ndarray, white: np.ndarray, cell_mask: np.ndarray, z_cam:
                      blue_pixels=int((blue & keep).sum()),
                      kept=(keep & (red | blue))[y0:y1, x0:x1].copy(),
                      status="有效面积不足或先后不明确")
-    red_acc = np.cumsum(np.count_nonzero(red & keep, axis=1))
-    blue_acc = np.cumsum(np.count_nonzero(blue & keep, axis=1))
-    both = np.flatnonzero((red_acc >= need) & (blue_acc >= need))
-    red_only = np.flatnonzero((red_acc >= need) & (blue_acc < need))
-    blue_only = np.flatnonzero((blue_acc >= need) & (red_acc < need))
-    found: list[tuple[int, str]] = []
-    if both.size:
-        found.append((int(both[0]), ""))
-    if red_only.size:
-        found.append((int(red_only[0]), "红"))
-    if blue_only.size:
-        found.append((int(blue_only[0]), "蓝"))
-    if not found:
+    ry, rx = np.nonzero(red & keep)
+    by, bx = np.nonzero(blue & keep)
+    if len(ry) < need or len(by) < need:
+        if debug is not None:
+            debug['status'] = '红蓝两色未同时达到阈值，不影响白盒层数'
+        return None, False
+    allowed=(diagnostic or {}).get('_cap_allowed')
+    if allowed is not None and np.any((red|blue)&keep&~allowed):
+        if debug is not None:
+            debug['status']='顶块归属未定，禁止判阵营或回退为两层'
+        return None,True
+    roll = float((diagnostic or {}).get('roll_deg', 0.0))
+    angle = np.deg2rad(roll)
+    # 重力投影的向下坐标，横滚时不能直接按图像行判断上下。
+    red_down = -np.sin(angle)*(rx-intr.cx)+np.cos(angle)*(ry-intr.cy)
+    blue_down = -np.sin(angle)*(bx-intr.cx)+np.cos(angle)*(by-intr.cy)
+    red_above = np.percentile(red_down,75) < np.percentile(blue_down,25)
+    blue_above = np.percentile(blue_down,75) < np.percentile(red_down,25)
+    overlap = min(rx.max(),bx.max())-max(rx.min(),bx.min())+1
+    if overlap < .5*min(np.ptp(rx)+1,np.ptp(bx)+1) or not (red_above or blue_above):
         return None, True
-    _row, name = min(found)
+    name = '红' if red_above else '蓝'
     if debug is not None:
-        debug["decision_row"] = _row
-        debug["result"] = name or None
-        debug["status"] = "已判定" if name else "同一行达阈值"
-    if not name:
-        return None, True
+        debug.update(result=name, status='红蓝完整且重力上下关系通过',
+                     decision_row=int(min(ry.min(),by.min())))
     return name, False
 
 
@@ -334,15 +474,17 @@ def _metric(pixels: float, z_cam: float, focal: float) -> float:
 def _z_at_cell(
     cell: Cell, u: float, v: float, pose: CarPose, offset: np.ndarray, pitch: float, intr: Intrinsics, roll: float = 0.0
 ) -> float | None:
-    # 这一像素的射线交到格子中心所在的横线上，读离地高度。距离用车位。
+    # 与朝向相机的格心竖直平面相交；不能固定用场地Y平面，侧视时会病态。
     origin, right, down, ahead = camera_frame(pose, offset, pitch, roll)
-    direction = ((u - intr.cx) / intr.fx) * right + ((v - intr.cy) / intr.fy) * down + ahead
-    if abs(float(direction[1])) < 1e-6:
+    direction = ((u-intr.cx)/intr.fx)*right + ((v-intr.cy)/intr.fy)*down + ahead
+    normal = np.array([cell.x, cell.y])-origin[:2]
+    denom = float(direction[:2] @ normal)
+    if abs(denom) < 1e-6:
         return None
-    t = (cell.y - float(origin[1])) / float(direction[1])
-    if t <= 0.2:
+    distance = float(normal @ normal)/denom
+    if distance <= .2:
         return None
-    return float(origin[2] + t * float(direction[2]))
+    return float(origin[2]+distance*direction[2])
 
 
 def _depth_in_range(z_cam: float) -> bool:
@@ -392,6 +534,8 @@ def _tower_clutter(
     pitch: float,
     intr: Intrinsics,
     roll: float = 0.0,
+    diagnostic: dict | None = None,
+    color: np.ndarray | None = None,
 ) -> tuple[bool, bool]:
     # 第一项：搜索框里有东西比近面更近，挡住了这一格的塔。
     # 第二项：台心柱体里、台面 8 cm 以上有东西，不能把这一格写成空。
@@ -401,7 +545,7 @@ def _tower_clutter(
     if len(xs) < _DEPTH_MIN_POINTS:
         return False, False
     values = depth[ys, xs].astype(np.float64)
-    good = np.isfinite(values) & (values >= _DEPTH_NEAR_M) & (values <= _DEPTH_FAR_M)
+    good = np.isfinite(values) & (values >= _DEPTH_NEAR_M)
     if int(good.sum()) < _DEPTH_MIN_POINTS:
         return False, False
     examined = float(len(xs))
@@ -425,6 +569,30 @@ def _tower_clutter(
         & (world[:, 2] <= cell.cap_z + _TOP_MARGIN_M)
     )
     holds = int(np.count_nonzero(risen)) >= _DEPTH_MIN_POINTS
+    if diagnostic is not None:
+        # 只有接在本塔两层白盒顶部附近的上层点才构成否决证据。
+        # 仅落进带定位余量的搜索柱体，不足以证明柜子/纸箱属于塔。
+        white = (_white_mask(color)[ys,xs]>0) if color is not None else np.ones(len(xs),bool)
+        visible_body=risen & white & (world[:,2]<=cell.two_z+.035)
+        # 锚点必须位于最近的白盒表面深度带，不能用背景自身的上下连续性自证归属。
+        body_depth=values[visible_body]
+        front_depth=float(np.percentile(body_depth,10)) if len(body_depth)>=30 else -np.inf
+        body = world[visible_body & (values<=front_depth+.08)
+                     & (world[:,2]>=cell.two_z-.12)]
+        upper = world[risen & (world[:,2]>=cell.two_z+.06)
+                      & (world[:,2]<=cell.two_z+.15)]
+        if len(body)>=30 and len(upper)>=30:
+            anchors=body[::max(1,len(body)//400)]
+            linked=[]
+            for part in np.array_split(upper,max(1,int(np.ceil(len(upper)/1000)))):
+                delta=part[:,None,:2]-anchors[None,:,:2]
+                linked.append(np.min(np.sum(delta*delta,axis=2),axis=1)<=.13**2)
+            attached=upper[np.concatenate(linked)]
+            if len(attached)>=30:
+                span=np.percentile(attached[:,:2],95,axis=0)-np.percentile(attached[:,:2],5,axis=0)
+                if np.linalg.norm(span)>=.08:
+                    diagnostic['upper_object']=dict(points=len(attached),
+                        width_cm=float(np.linalg.norm(span))*100,attached_to_body=True)
     front_n = int(np.count_nonzero(front))
     covers = front_n / examined >= _OCCLUDE_FRAC
     if not covers and front_n >= _DEPTH_MIN_POINTS:
@@ -528,7 +696,16 @@ def _silhouette_top(
     for index, count in zip(ids, counts):
         if int(index) <= 0 or int(count) < _DEPTH_MIN_POINTS:
             continue
-        comp_y, comp_x = np.nonzero(labels == int(index))
+        component = labels == int(index)
+        comp_y, comp_x = np.nonzero(component)
+        # 补高必须来自独立完整盒形，不能取与墙/地面粘连的全局最高白点。
+        if (comp_x.min()<=1 or comp_x.max()>=intr.width-2
+                or not _block_shaped(component)):
+            continue
+        distance = float(to_camera(cell.center(cell.one_z),pose,offset,pitch,roll)[2])
+        width = _metric(float(np.ptp(comp_x)+1),distance,intr.fx)
+        if not WIDTH_MIN_M<=width<=WIDTH_MAX_M:
+            continue
         top_row = int(comp_y.min())
         if top_row <= 1 or top_row >= intr.height - 2:
             continue
@@ -576,16 +753,7 @@ def _cap_from_depth(cell, world, xs, ys, distance, color, mask, intr, diagnostic
     )
     band, tops = _band_above(white_body, mask, cap_px)
 
-    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
-    red = (
-        (cv2.inRange(hsv, np.array(RED[0]), np.array(RED[1])) > 0)
-        | (cv2.inRange(
-            hsv, np.array(RED_WRAP[0]), np.array(RED_WRAP[1])
-        ) > 0)
-    )
-    blue = cv2.inRange(
-        hsv, np.array(BLUE[0]), np.array(BLUE[1])
-    ) > 0
+    red,blue=_cap_colors(color,diagnostic,possible=True)
 
     count, labels, stats, _ = cv2.connectedComponentsWithStats(
         ((red | blue) & band).astype(np.uint8),
@@ -628,6 +796,153 @@ def _cap_from_depth(cell, world, xs, ys, distance, color, mask, intr, diagnostic
     return faction, None
 
 
+def _near_top_observed(world, xs, ys, color, depth, intr, diagnostic):
+    """横向多数实测列到达颜色边界或深度后退处；中段深度截断不当作盒顶。"""
+    columns, first = np.unique(xs, return_index=True)
+    if len(columns)<8:
+        return False
+    gray = cv2.cvtColor(color,cv2.COLOR_BGR2GRAY).astype(float)
+    heights = world[first,2]
+    middle = float(np.median(heights))
+    stable = np.abs(heights-middle)<=.04
+    seen = 0
+    for index in first[stable]:
+        u,v = int(xs[index]),int(ys[index])
+        if not (1<=u<intr.width-1 and 4<=v<intr.height-2):
+            continue
+        # 顶边混合深度允许3像素误差；比较盒面与顶边上方。
+        below = gray[v:v+3,u-1:u+2]
+        above = gray[v-4:v-1,u-1:u+2]
+        edge = abs(float(np.median(below))-float(np.median(above)))>=12
+        behind = False
+        if depth is not None:
+            patch = depth[v-4:v-1,u-1:u+2]
+            behind = np.count_nonzero(np.isfinite(patch)&(patch>depth[v,u]+.25))>=7
+        if edge or behind:
+            seen += 1
+    if diagnostic is not None:
+        diagnostic['near_top_check'] = dict(columns=len(columns),valid_columns=seen,
+                                            height_cm=middle*100)
+    return seen>=max(6,.45*len(columns))
+
+
+def _near_depth_top(world,xs,ys,depth,intr,diagnostic=None):
+    """实测深度的盒顶支撑；未知列不当反证，顶部缺测也不当空域。"""
+    info={'state':'unknown','valid_columns':0,'unknown_columns':0,'occluded_columns':0,
+          'continued_columns':0}
+    if diagnostic is not None:
+        diagnostic['depth_top_check']=info
+    if depth is None or len(xs)<30:
+        return False
+    columns,first=np.unique(xs,return_index=True)
+    if len(columns)<12:
+        return False
+    heights=world[first,2]
+    top_height=float(np.percentile(heights,80))
+    good_columns=[]
+    for index in first:
+        u,v=int(xs[index]),int(ys[index])
+        if not (1<=u<intr.width-1 and 4<=v<intr.height-2):
+            info['unknown_columns']+=1
+            continue
+        # 只采用到达同一顶高的列；低侧面、前景或缺测列不拉低顶高。
+        if abs(world[index,2]-top_height)>.04:
+            info['unknown_columns']+=1
+            continue
+        distance=float(depth[v,u])
+        patch=depth[v-4:v-1,u-1:u+2]
+        valid=np.isfinite(patch)&(patch>=_DEPTH_NEAR_M)
+        n=int(valid.sum())
+        if n<5:
+            info['unknown_columns']+=1
+        elif np.count_nonzero(valid&(patch>distance+.08))>=.7*n:
+            good_columns.append(index)
+        elif np.count_nonzero(valid&(patch<distance-.12))>=.7*n:
+            info['occluded_columns']+=1
+        else:
+            info['continued_columns']+=1
+    info['valid_columns']=len(good_columns)
+    info['height_cm']=top_height*100
+    if len(good_columns)<12:
+        return False
+    support=world[good_columns]
+    xy=support[:,:2]-np.median(support[:,:2],axis=0)
+    _,_,axes=np.linalg.svd(xy,full_matrices=False)
+    spans=np.percentile(xy@axes.T,95,axis=0)-np.percentile(xy@axes.T,5,axis=0)
+    width=float(spans.max())
+    info['support_width_cm']=width*100
+    # 最少12列、12cm实测横向支撑；不能靠一个小角认定整座塔。
+    # 仍连续的同深度表面超过有效观测20%时，顶部证据不足。
+    observed=len(good_columns)+info['continued_columns']
+    good=(width>=.12 and len(good_columns)>=.8*observed)
+    info['state']='supported' if good else 'unknown'
+    return good
+
+
+def _near_body_support(cell,world,distance,xs,ys,shape,diagnostic=None):
+    """先在三维中选择前侧盒体，再量高度；搜索范围不是物体归属证明。"""
+    info={'groups':[]}
+    if diagnostic is not None:
+        diagnostic['near_body']=info
+    raised=world[:,2]>=cell.base_z+.06
+    labels,ids=_far_spatial_labels(world,raised,ys,xs,shape)
+    groups=[]
+    for label in ids:
+        own=raised & (labels[ys,xs]==label)
+        points=world[own]
+        xy=points[:,:2]-np.median(points[:,:2],axis=0)
+        _,_,axes=np.linalg.svd(xy,full_matrices=False)
+        width=float(np.max(np.percentile(xy@axes.T,95,axis=0)-np.percentile(xy@axes.T,5,axis=0)))
+        span=float(np.percentile(points[:,2],98)-np.percentile(points[:,2],2))
+        front=float(np.percentile(distance[own],20))
+        detail=dict(id=label,points=int(own.sum()),width_cm=width*100,
+                    visible_cm=span*100,front_m=front)
+        info['groups'].append(detail)
+        if WIDTH_MIN_M<=width<=WIDTH_MAX_M and span>=.035:
+            groups.append((front,label,own))
+    if not groups:
+        info['reason']='没有独立且宽高支撑充分的盒体'
+        return None
+    groups.sort(key=lambda item:item[0])
+    _,label,selected=groups[0]
+    # 叠放错位或接缝造成的断开，只在实测表面空间相邻时合并。
+    # 深度跳变、远处高标签不能因为投影重叠就合进来。
+    for _ in range(2):
+        changed=False
+        for _,other_label,own in groups[1:]:
+            if np.any(selected & own):
+                continue
+            a=world[selected];b=world[own]
+            low_a,high_a=np.percentile(a[:,2],[2,98])
+            low_b,high_b=np.percentile(b[:,2],[2,98])
+            # 两块上下接续；并排的墙面/纸板不凭深度相近合并。
+            gap=min(abs(low_b-high_a),abs(low_a-high_b))
+            overlap=min(high_a,high_b)-max(low_a,low_b)
+            if gap>.08 or overlap>.08:
+                continue
+            aa=a[::max(1,len(a)//300)];bb=b[::max(1,len(b)//300)]
+            delta=aa[:,None,:]-bb[None,:,:]
+            if np.min(np.sum(delta*delta,axis=2))>.10**2:
+                continue
+            points=world[selected|own]
+            spans=np.percentile(points[:,:2],95,axis=0)-np.percentile(points[:,:2],5,axis=0)
+            if np.linalg.norm(spans)>WIDTH_MAX_M:
+                continue
+            selected|=own
+            changed=True
+        if not changed:
+            break
+    info.update(selected_group=label,selected_points=int(selected.sum()),
+                excluded_points=int(raised.sum()-selected.sum()))
+    # 不把同位置的两个相近主体随意选一个；无法分清时保持未知。
+    selected_front=float(np.percentile(distance[selected],20))
+    for front,other_label,own in groups[1:]:
+        if not np.any(selected&own) and abs(front-selected_front)<.08:
+            info['reason']='多个独立盒体距离接近，归属不唯一'
+            return None
+    return selected
+
+
 def _depth_on_cell(
     cell: Cell,
     cloud: dict | None,
@@ -641,6 +956,7 @@ def _depth_on_cell(
     pitch: float = 0.0,
     roll: float = 0.0,
     diagnostic: dict | None = None,
+    depth: np.ndarray | None = None,
 ) -> tuple[str | None, np.ndarray | None, bool, bool]:
     # 只留下落在这一格 50 cm 里的白点。最高那一截的离地高度对上某一档，才写层数。
     # 最高一截若只剩画面边上的点，顶被切掉了，不写。
@@ -705,6 +1021,17 @@ def _depth_on_cell(
                         "extra_points": int(extra.sum()),
                     }
                 width = recovered_width
+    selected_body=_near_body_support(cell,world,distance,xs,ys,mask.shape,diagnostic)
+    if selected_body is None:
+        # 仍保留窄板/3米截断的原有诊断，但不从多个杂点拼出完整盒宽。
+        if WIDTH_MIN_M<=width<=WIDTH_MAX_M:
+            return fail("深度归属未证实：没有唯一可靠盒体",veto=True)
+    else:
+        world,xs,ys,distance=world[selected_body],xs[selected_body],ys[selected_body],distance[selected_body]
+        risen=world[:,2]>=cell.base_z+MIN_VISIBLE_M
+        if np.count_nonzero(risen)<30:
+            return fail("深度归属不足：盒身支撑少于30点",veto=True)
+        width=width_of(world[risen])
     if diagnostic is not None:
         diagnostic["depth_width_cm"] = width * 100
     if not (WIDTH_MIN_M <= width <= WIDTH_MAX_M):
@@ -735,7 +1062,8 @@ def _depth_on_cell(
         )[::max(1, int(top.sum())//80)].tolist()
         diagnostic["depth_height_cm"] = top_z * 100
         diagnostic["height_source"] = "深度最高切片"
-    if pose is not None and offset is not None:
+    if (pose is not None and offset is not None
+            and (diagnostic or {}).get('near_body',{}).get('excluded_points',0)==0):
         seen = _silhouette_top(cell, labels, xs, ys, pose, offset, pitch, intr, roll)
         # 彩色顶边对得上两层、深度却停在下面，用顶边。不要把一面墙的高点当成两层。
         if (
@@ -782,12 +1110,24 @@ def _depth_on_cell(
             f"层高不符：采用高度{top_z*100:.1f}厘米；一层允许{cell.one_z*80:.1f}至{cell.one_z*120:.1f}，两层允许{cell.two_z*80:.1f}至{cell.two_z*120:.1f}厘米；来源{diagnostic.get('height_source', '深度') if diagnostic is not None else '深度'}",
             piece, outside, True,
         )
+    if pose is not None and offset is not None:
+        depth_top=_near_depth_top(world,xs,ys,depth,intr,diagnostic)
+        if depth_top:
+            if diagnostic is not None:
+                diagnostic['height_source']='深度最高切片＋实测顶边支撑'
+                diagnostic['depth_primary']=True
+        elif ((diagnostic or {}).get('height_source')!='彩色顶边补高'
+              and not _near_top_observed(world,xs,ys,color,depth,intr,diagnostic)):
+            return fail("盒顶未证实：实测深度只到盒面中段或顶边被遮挡",piece,outside,True)
     if one_ok and two_ok:
         use_two = abs(top_z - cell.two_z) <= abs(top_z - cell.one_z)
     else:
         use_two = two_ok
     if not use_two:
         return "1", piece, outside, False
+    if (diagnostic or {}).get('depth_primary'):
+        # 完整顶块由独立RGB/整塔高度路径仲裁；零碎颜色不推翻可靠白盒深度。
+        return "2",piece,outside,False
     faction, unclear = _faction(color, piece_mask, mask, float(np.median(distance)), intr, diagnostic)
     if unclear:
         return fail("阵营不清：塔顶颜色不足或上下关系不明确", piece, outside, True)
@@ -949,13 +1289,104 @@ def _color_reading(
     return (faction if faction is not None else "2", piece, distance)
 
 
+def _side_visibility(cell,x,width,pose,offset,pitch,intr,z,side,roll=0.):
+    """只衡量左右出画；图像边界不是物体边界。位置/高度另行核验。"""
+    if x>1 and x+width<intr.width-1:
+        return 1.0
+    uv=project(cell.center(z),pose,offset,pitch,intr,roll)
+    if uv is None or not 0<=uv[0]<intr.width:
+        return 0.0
+    # 中心到未截断侧边估计全宽，同时限制不能小于真实物体的最小投影宽。
+    center=float(uv[0])
+    full=2*(x+width-center) if x<=1 else 2*(center-x)
+    distance=float(to_camera(cell.center(z),pose,offset,pitch,roll)[2])
+    expected=max(full,side*intr.fx/max(.2,distance))
+    return min(1.,(width+2)/max(1.,expected))
+
+
+def _upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll=0.,diagnostic=None):
+    """底部前景遮挡时，用本塔上部实测盒面、真实顶边和上方空域确认层数。"""
+    info={}
+    if diagnostic is not None:
+        diagnostic['upper_white']=info
+    if depth is None:
+        return None
+    ys,xs=np.nonzero((mask>0)&(white>0)&np.isfinite(depth)&(depth>=_DEPTH_NEAR_M))
+    if len(xs)<30:
+        return None
+    values=depth[ys,xs].astype(float)
+    origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+    world=(origin+((xs-intr.cx)*values/intr.fx)[:,None]*right
+           +((ys-intr.cy)*values/intr.fy)[:,None]*down+values[:,None]*ahead)
+    x0,x1,y0,y1=cell.search_bounds(0.)
+    own=((world[:,0]>=x0)&(world[:,0]<=x1)&(world[:,1]>=y0)&(world[:,1]<=y1)
+         &(world[:,2]>=cell.base_z+.025)&(world[:,2]<=cell.cap_z+.1))
+    world,xs,ys=world[own],xs[own],ys[own]
+    if len(xs)<30:
+        return None
+    # 先看全部格内支撑，再匹配一/两层，不能先裁成一层。
+    highest=float(np.percentile(world[:,2],98))
+    state,level=min([('1',cell.one_z),('2',cell.two_z)],key=lambda item:abs(highest-item[1]))
+    tolerance=.065
+    if abs(highest-level)>tolerance:
+        info['reason']='实测盒面顶高不符合一层或两层'
+        return None
+    columns,first=np.unique(xs,return_index=True)
+    top=float(np.median(world[first,2]))
+    span=float(np.percentile(world[:,2],98)-np.percentile(world[:,2],2))
+    xy=world[:,:2]-np.median(world[:,:2],axis=0)
+    _,_,axes=np.linalg.svd(xy,full_matrices=False)
+    widths=np.percentile(xy@axes.T,95,axis=0)-np.percentile(xy@axes.T,5,axis=0)
+    info.update(top_cm=top*100,visible_cm=span*100,width_cm=float(max(widths))*100)
+    if abs(top-level)>tolerance or span<.035 or not .12<=max(widths)<=WIDTH_MAX_M:
+        return None
+    # 至少三成盒宽可见；层数仍需实测顶边支撑。
+    if _side_visibility(cell,int(xs.min()),int(xs.max()-xs.min()+1),pose,offset,pitch,
+                        intr,(cell.base_z+level)/2,.35,roll)<.3:
+        return None
+    if not _near_top_observed(world,xs,ys,color,depth,intr,info):
+        info['reason']='未证实真实盒顶'
+        return None
+    if not _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,info.setdefault('upper_space',{})):
+        info['reason']='盒顶上方空域未证实'
+        return None
+    piece=np.zeros(mask.shape,np.uint8)
+    piece[ys,xs]=255
+    info.update(reason='本塔上部盒面＋真实顶边＋上方空域',layers=state)
+    return state,_outline(piece)
+
+
+def _cap_width_limit(cell, pose, offset, pitch, intr, z_cam, roll=0.0):
+    """顶块随盒体旋转，两个面同时可见；投影包络还包含安装/定位容差。"""
+    widths = []
+    # 24cm包络包含20cm顶块的尺寸与轮廓误差；偏移只改变透视比例，
+    # 不能把不同位置的包络并起来虚增物体自身宽度。
+    for dx in (-.10, 0., .10):
+        for dy in (-.10, 0., .10):
+            for angle in np.linspace(0., np.pi/2, 9):
+                c, sn = np.cos(angle), np.sin(angle)
+                pixels = []
+                for a in (-.12, .12):
+                    for b in (-.12, .12):
+                        for z in (cell.two_z, cell.cap_z):
+                            uv = project(np.array([cell.x+dx+c*a-sn*b,
+                                                   cell.y+dy+sn*a+c*b,z]),
+                                         pose,offset,pitch,intr,roll)
+                            if uv is not None:
+                                pixels.append(float(uv[0]))
+                if len(pixels) == 8:
+                    widths.append(max(pixels)-min(pixels))
+    predicted = _metric(max(widths)+2, z_cam, intr.fx) if widths else .34
+    return max(.34, min(.40, predicted))
+
+
 def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
                      roll=0.0, diagnostic=None):
     """顶块独立提供阵营证据；白盒遮挡、粘连和缺失深度不否定它。"""
-    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
-    red = (cv2.inRange(hsv, np.array(RED[0]), np.array(RED[1]))
-           | cv2.inRange(hsv, np.array(RED_WRAP[0]), np.array(RED_WRAP[1]))) > 0
-    blue = cv2.inRange(hsv, np.array(BLUE[0]), np.array(BLUE[1])) > 0
+    red,blue=_cap_colors(color)
+    allowed=(diagnostic or {}).get('_cap_allowed')
+    suspected_allowed=(diagnostic or {}).get('_cap_suspected_allowed')
+    width_limit = _cap_width_limit(cell,pose,offset,pitch,intr,z_cam,roll)
     radius = max(1, min(3, int(round(.015 * intr.fy / z_cam))))
     colored = (red | blue).astype(np.uint8)
     closed = cv2.morphologyEx(colored, cv2.MORPH_CLOSE,
@@ -963,6 +1394,7 @@ def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
     count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
     candidates = []
     checks = []
+    suspected = []
     for index in range(1, count):
         x, y, w, h, pixels = [int(v) for v in stats[index]]
         # 小噪点不构造整帧布尔图；仍计入components原始块数。
@@ -975,6 +1407,7 @@ def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
         item = dict(id=index, bbox=[x, y, w, h], pixels=pixels,
                     inside_pixels=inside, coverage=inside/max(1, pixels),
                     width_cm=_metric(w, z_cam, intr.fx)*100,
+                    width_limit_cm=width_limit*100,
                     height_cm=_metric(h, z_cam, intr.fy)*100,
                     fill=pixels/max(1, w*h), failures=[])
         if diagnostic is not None and inside:
@@ -983,55 +1416,80 @@ def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
             item['failures'].append(reason)
         if pixels < 12:
             reject('颜色块不足12像素')
-        if x <= 1 or y <= 1 or x+w >= intr.width-1 or y+h >= intr.height-1:
-            reject('颜色块触及画面边缘')
-        if not (.08 <= _metric(w, z_cam, intr.fx) <= .34):
-            reject('宽度不在8至34cm')
-        if not (.14 <= _metric(h, z_cam, intr.fy) <= .28):
-            reject('高度不在14至28cm')
-        if pixels < .45*w*h:
-            reject('填充率不足45%')
-        if inside < .9*pixels:
-            reject('格内覆盖不足90%')
+        side_cut=x<=1 or x+w>=intr.width-1
+        side_fraction=_side_visibility(cell,x,w,pose,offset,pitch,intr,
+                                       (cell.two_z+cell.cap_z)/2,.20,roll)
+        item['side_visible_fraction']=side_fraction
+        # 已知场地的红蓝配对本身就是顶块证据。裁切、遮挡、位姿误差
+        # 会改变尺寸及推算顶高，不能再用完整顶块的尺寸否决可见配对。
+        if pixels < .30*w*h:
+            reject('填充率不足30%')
+        if inside < .35*pixels:
+            reject('格内覆盖不足35%')
         # 两色面积提前记录，单色碎片也能查明是否断开。
         ry, rx = np.nonzero(red & part)
         by, bx = np.nonzero(blue & part)
-        need = max(8, int(.10*pixels))
+        need = max(8, int(.05*pixels))
         item.update(red_pixels=len(ry), blue_pixels=len(by), need=need)
+        # 单色背景不构成顶块占用证据；红蓝均成块时才保留待确认状态。
+        item['suspected'] = False
+        paired_blocks = (len(ry)>=need and len(by)>=need and all(
+            xx.max()-xx.min()+1>=3 and yy.max()-yy.min()+1>=3
+            and len(yy)>=.35*(xx.max()-xx.min()+1)*(yy.max()-yy.min()+1)
+            for yy,xx in ((ry,rx),(by,bx))))
+        if (paired_blocks
+                and (suspected_allowed is None or np.count_nonzero(part & suspected_allowed)>=.8*pixels)
+                and .08 <= item['width_cm']/100 <= .40
+                and .04 <= item['height_cm']/100 <= .32
+                and item['coverage'] >= .80 and item['fill'] >= .30
+                and y>1 and y+h<intr.height-1 and (not side_cut or side_fraction>=.8)):
+            samples = [x+w*.25, x+w*.5, x+w*.75]
+            bottoms = [_z_at_cell(cell, u, y+h, pose, offset, pitch, intr, roll)
+                       for u in samples]
+            tops = [_z_at_cell(cell, u, y, pose, offset, pitch, intr, roll)
+                    for u in samples]
+            if all(v is not None for v in bottoms+tops):
+                bottom, top = float(np.median(bottoms)), float(np.median(tops))
+                item.update(suspected_bottom_cm=bottom*100, suspected_top_cm=top*100)
+                if (bottom >= cell.two_z-.05 and bottom <= cell.cap_z-.025
+                        and top >= cell.two_z+.04 and top <= cell.cap_z+.10):
+                    item['suspected'] = True
+                    suspected.append(index)
         if len(ry) < need or len(by) < need:
             reject('红或蓝面积不足（可能单色/断开）')
         if item['failures']:
             continue
-        py, px = np.nonzero(part)
-        cols = np.unique(px)
-        low = [py[px == col].max()+1 for col in cols]
-        high = [py[px == col].min() for col in cols]
-        bottom_z = [_z_at_cell(cell, col, row, pose, offset, pitch, intr, roll)
-                    for col, row in zip(cols, low)]
-        top_z = [_z_at_cell(cell, col, row, pose, offset, pitch, intr, roll)
-                 for col, row in zip(cols, high)]
-        if any(v is None for v in bottom_z+top_z):
-            reject('顶底射线不能与格位平面相交')
-            continue
-        bottom, top = float(np.median(bottom_z)), float(np.median(top_z))
-        item.update(bottom_cm=bottom*100, top_cm=top*100,
-                    bottom_error_cm=(bottom-cell.two_z)*100,
-                    top_error_cm=(top-cell.cap_z)*100)
-        if abs(bottom-cell.two_z) > .12:
-            reject('底高误差超过12cm')
-        if abs(top-cell.cap_z) > .15:
-            reject('顶高误差超过15cm')
+        # 各色也须呈块状，避免两根细线凑成红蓝配对。
+        for yy,xx in ((ry,rx),(by,bx)):
+            if (xx.max()-xx.min()+1<3 or yy.max()-yy.min()+1<3
+                    or len(yy)<.35*(xx.max()-xx.min()+1)*(yy.max()-yy.min()+1)):
+                reject('单色不是有面积的块状区域')
+        bottom=_z_at_cell(cell,x+w/2,y+h,pose,offset,pitch,intr,roll)
+        top=_z_at_cell(cell,x+w/2,y,pose,offset,pitch,intr,roll)
+        if bottom is not None and top is not None:
+            item.update(bottom_cm=bottom*100,top_cm=top*100,
+                        bottom_error_cm=(bottom-cell.two_z)*100,
+                        top_error_cm=(top-cell.cap_z)*100)
         overlap = min(rx.max(), bx.max()) - max(rx.min(), bx.min()) + 1
         overlap_ratio = float(overlap / min(rx.max()-rx.min()+1, bx.max()-bx.min()+1))
         item['horizontal_overlap'] = overlap_ratio
         if overlap_ratio < .5:
             reject('红蓝横向重叠不足50%')
-        red_above = np.percentile(ry, 75) < np.percentile(by, 25)
-        blue_above = np.percentile(by, 75) < np.percentile(ry, 25)
-        item['vertical_gap_px'] = float(max(np.percentile(by, 25)-np.percentile(ry, 75),
-                                            np.percentile(ry, 25)-np.percentile(by, 75)))
+        angle = np.deg2rad(roll)
+        rd = -np.sin(angle)*(rx-intr.cx)+np.cos(angle)*(ry-intr.cy)
+        bd = -np.sin(angle)*(bx-intr.cx)+np.cos(angle)*(by-intr.cy)
+        red_above = np.percentile(rd,75) < np.percentile(bd,25)
+        blue_above = np.percentile(bd,75) < np.percentile(rd,25)
+        item['vertical_gap_px'] = float(max(np.percentile(bd,25)-np.percentile(rd,75),
+                                            np.percentile(rd,25)-np.percentile(bd,75)))
         if not (red_above or blue_above):
             reject('红蓝上下未分开（分位间距须大于0）')
+        if not item['failures'] and allowed is not None and np.count_nonzero(part & allowed)<.8*pixels:
+            if suspected_allowed is not None and np.count_nonzero(part & suspected_allowed)>=.8*pixels:
+                # 合格红蓝配对仅归属未定，即使出画也不能降级为普通白盒。
+                item['suspected']=True
+                suspected.append(index)
+            reject('顶块未唯一归属本塔')
         if item['failures']:
             continue
         item['result'] = '红' if red_above else '蓝'
@@ -1039,6 +1497,9 @@ def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
     if diagnostic is not None:
         diagnostic['rgb_cap'] = dict(
             candidates=len(candidates), components=count-1, checks=checks,
+            state=('confirmed' if len(candidates) == 1 else
+                   'suspected' if suspected or candidates else 'absent'),
+            suspected_components=suspected,
             distance_m=z_cam, pitch_deg=float(pitch), roll_deg=float(roll),
             yaw_deg=float(np.degrees(pose.yaw)),
             expected_bottom_cm=cell.two_z*100, expected_top_cm=cell.cap_z*100,
@@ -1064,21 +1525,20 @@ def _far_cap_reading(cell, color, white, depth, mask, pose, offset, pitch,
 
     if depth is None or depth.shape != white.shape:
         return fail("远处粘连：缺少可核验白盒归属的深度")
-    hsv = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
-    colored = ((cv2.inRange(hsv, np.array(RED[0]), np.array(RED[1]))
-                | cv2.inRange(hsv, np.array(RED_WRAP[0]), np.array(RED_WRAP[1]))
-                | cv2.inRange(hsv, np.array(BLUE[0]), np.array(BLUE[1]))) > 0)
+    red,blue=_cap_colors(color,diagnostic)
+    colored=red|blue
     # 只跨过红蓝之间很小的黑缝，不能把相隔的彩色杂物拼成顶块。
     radius = max(1, min(3, int(round(.015 * intr.fy / z_cam))))
     closed = cv2.morphologyEx(colored.astype(np.uint8), cv2.MORPH_CLOSE,
                              np.ones((2*radius+1, 2*radius+1), np.uint8))
     count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
     candidates = []
+    width_limit = _cap_width_limit(cell,pose,offset,pitch,intr,z_cam,roll)
     for index in range(1, count):
         x, y, w, h, pixels = stats[index]
         if pixels < 12 or x <= 1 or y <= 1 or x+w >= intr.width-1 or y+h >= intr.height-1:
             continue
-        if not (.08 <= _metric(w, z_cam, intr.fx) <= .34
+        if not (.08 <= _metric(w, z_cam, intr.fx) <= width_limit
                 and .14 <= _metric(h, z_cam, intr.fy) <= .28
                 and pixels >= .45*w*h):
             continue
@@ -1158,26 +1618,57 @@ def _far_cap_reading(cell, color, white, depth, mask, pose, offset, pitch,
     return faction, _outline(piece)
 
 
-def _upper_space_clear(cell, top_z, pose, offset, pitch, intr, depth, roll=0.0):
-    """多条射线穿过预期上层/顶块区域后才碰到背景，才能证明上方为空。"""
-    total = clear = 0
-    for level in np.arange(top_z+.08, cell.cap_z+.081, .06):
-        for dx in (-.10, 0., .10):
-            point = np.array([cell.x+dx, cell.y, level])
-            pixel = project(point, pose, offset, pitch, intr, roll)
-            total += 1
-            if pixel is None:
-                continue
-            u,v = np.round(pixel).astype(int)
-            if not (1 <= u < intr.width-1 and 1 <= v < intr.height-1):
-                continue
-            patch = depth[v-1:v+2,u-1:u+2]
-            valid = np.isfinite(patch) & (patch >= _DEPTH_NEAR_M)
-            expected = float(to_camera(point,pose,offset,pitch,roll)[2])
-            # 台心纵深半宽30cm，另留10cm，须看见柱体后面的背景。
-            if valid.sum() >= 7 and np.count_nonzero(valid & (patch > expected+.40)) >= 7:
-                clear += 1
-    return total >= 6 and clear / total >= .80
+def _upper_space_clear(cell, top_z, pose, offset, pitch, intr, depth, roll=0.0, diagnostic=None):
+    """验证采样射线已穿过上方塔位；近背景也可证明空域，缺测不充当占用。"""
+    if diagnostic is not None:
+        diagnostic.update(state='unknown',levels=[])
+    if depth is None:
+        return False
+    half=min(.20,cell.foot/2-.02)
+    unknown=False
+    for level in np.arange(top_z+.08,cell.cap_z+.081,.06):
+        clear=observed=occupied=0
+        for dx in np.linspace(-half,half,5):
+            for dy in np.linspace(-half,half,5):
+                point=np.array([cell.x+dx,cell.y+dy,level])
+                pixel=project(point,pose,offset,pitch,intr,roll)
+                if pixel is None:
+                    continue
+                u,v=np.round(pixel).astype(int)
+                if not (1<=u<intr.width-1 and 1<=v<intr.height-1):
+                    continue
+                patch=depth[v-1:v+2,u-1:u+2]
+                valid=np.isfinite(patch)&(patch>=_DEPTH_NEAR_M)
+                if np.count_nonzero(valid)<5:
+                    continue
+                observed+=1
+                expected=float(to_camera(point,pose,offset,pitch,roll)[2])
+                # 深度确实越过本采样位置即可，不再强求背景还远40cm。
+                # 5cm余量抑制深度噪声；至少80%的有效邻域支持同一结论。
+                if np.count_nonzero(valid&(patch>expected+.05))>=.8*np.count_nonzero(valid):
+                    clear+=1
+                elif np.count_nonzero(valid&(np.abs(patch-expected)<=.08))>=.8*np.count_nonzero(valid):
+                    occupied+=1
+        # 一些缺测允许存在，但每个高度仍需至少半数位置有观测，不能凭空补空域。
+        if diagnostic is not None:
+            diagnostic['levels'].append(dict(height_cm=float(level*100),observed=observed,
+                                               clear=clear,occupied=occupied))
+        if occupied>=2:
+            if diagnostic is not None:
+                diagnostic['state']='occupied'
+            return False
+        unknown |= observed<13 or clear/max(1,observed)<.8
+    if diagnostic is not None:
+        diagnostic['state']='unknown' if unknown else 'clear'
+    return not unknown
+
+
+def _rgb_upper_consistent(cell, level, pose, offset, pitch, intr, depth, roll, info):
+    """RGB已有真实顶边时，上方缺测只记未知；实测占用仍作反证。"""
+    _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,info)
+    if info.get('state')=='clear':
+        return True
+    return info.get('state')!='occupied'
 
 
 def _far_white_group(world, own, labels, ys, xs, component):
@@ -1209,6 +1700,85 @@ def _far_white_group(world, own, labels, ys, xs, component):
     return selected
 
 
+def _vertical_faces(world, selected):
+    """确定性稳健拟合竖直面：把同一连通组的正面/侧面与横向杂点分开。"""
+    indices = np.flatnonzero(selected)
+    points = world[indices]
+    if len(points) < 30:
+        return []
+    xy = points[:, :2]-np.median(points[:, :2],axis=0)
+    _,_,axes = np.linalg.svd(xy,full_matrices=False)
+    if np.percentile(np.abs(xy@axes[-1]),90) <= .035:
+        return [selected]
+    rng = np.random.default_rng(0)
+    remaining = np.ones(len(indices),bool)
+    faces = []
+    for _ in range(4):
+        ids = np.flatnonzero(remaining)
+        if len(ids)<30:
+            break
+        sample = ids[np.linspace(0,len(ids)-1,min(256,len(ids))).astype(int)]
+        pairs = rng.choice(sample,size=(64,2))
+        best = None
+        for first,second in pairs:
+            direction = points[second,:2]-points[first,:2]
+            length = np.linalg.norm(direction)
+            if length < .12:
+                continue
+            normal = np.array([-direction[1],direction[0]])/length
+            hits = np.abs((points[sample,:2]-points[first,:2])@normal) <= .02
+            score = int(hits.sum())
+            if score < 12:
+                continue
+            if np.ptp(points[sample[hits],2]) < .03:
+                continue
+            if best is None or score>best[0]:
+                best = score,normal,points[first,:2]
+        if best is None:
+            break
+        _,normal,anchor = best
+        inlier = remaining & (np.abs((points[:,:2]-anchor)@normal)<=.02)
+        if inlier.sum()<30:
+            break
+        center = np.median(points[inlier,:2],axis=0)
+        _,_,axes = np.linalg.svd(points[inlier,:2]-center,full_matrices=False)
+        inlier = remaining & (np.abs((points[:,:2]-center)@axes[-1])<=.025)
+        face = np.zeros(len(world),bool)
+        face[indices[inlier]] = True
+        faces.append(face)
+        remaining[inlier] = False
+    return faces
+
+
+def _far_spatial_labels(world, own, ys, xs, shape):
+    """在4厘米三维网格上分组，禁止二维闭运算跨过前后表面的深度跳变。"""
+    indices = np.flatnonzero(own)
+    voxels, inverse = np.unique(np.floor(world[own]/.04).astype(np.int32),
+                                axis=0, return_inverse=True)
+    lookup = {tuple(v): i for i, v in enumerate(voxels)}
+    groups = np.zeros(len(voxels), np.int32)
+    neighbors = [(a,b,c) for a in (-1,0,1) for b in (-1,0,1)
+                 for c in (-1,0,1) if (a,b,c) != (0,0,0)]
+    number = 0
+    for start in range(len(voxels)):
+        if groups[start]:
+            continue
+        number += 1
+        groups[start] = number
+        queue = [start]
+        while queue:
+            x,y,z = map(int, voxels[queue.pop()])
+            for a,b,c in neighbors:
+                index = lookup.get((x+a,y+b,z+c))
+                if index is not None and not groups[index]:
+                    groups[index] = number
+                    queue.append(index)
+    labels = np.zeros(shape, np.int32)
+    labels[ys[indices], xs[indices]] = groups[inverse]
+    counts = np.bincount(groups[inverse], minlength=number+1)
+    return labels, [int(i) for i in np.argsort(counts[1:])[::-1]+1 if counts[i]>=30]
+
+
 def _far_white_top_edge(support, xs, ys, depth, intr):
     """盒底缺失时，要求横向分布的平顶及紧邻顶边后的背景深度。"""
     columns, first = np.unique(xs, return_index=True)
@@ -1237,6 +1807,84 @@ def _far_white_top_edge(support, xs, ys, depth, intr):
     return clear >= .80*len(columns)
 
 
+def _far_rgb_top(support, xs, ys, color, white, depth, pose, offset,
+                 pitch, intr, roll, diagnostic=None):
+    """实测竖直盒面限定搜索；原图顶边须横向一致且上方有后退的背景深度。"""
+    detail = {} if diagnostic is None else diagnostic
+    def fail(reason):
+        detail['reason'] = reason
+        return None
+    center = np.median(support[:, :2], axis=0)
+    _, _, axes = np.linalg.svd(support[:, :2]-center, full_matrices=False)
+    normal = axes[-1]
+    detail['plane_error_cm'] = float(np.percentile(np.abs((support[:, :2]-center) @ normal), 90))*100
+    if detail['plane_error_cm'] > 3.5:
+        return fail('盒面不共面')
+    origin, right, down, ahead = camera_frame(pose, offset, pitch, roll)
+    columns, first = np.unique(xs, return_index=True)
+    detail['support_columns'] = len(columns)
+    if len(columns) < 8:
+        return fail('横向支撑不足8列')
+    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY).astype(float)
+    hits = []
+    edge_seen = background_seen = 0
+    for col, index in zip(columns, first):
+        row = int(ys[index])
+        # 最多补回12厘米；不能向上无限搜索柜门、墙线或预期层高。
+        reach = max(3, int(np.ceil(.12*intr.fy/depth[row, col])))
+        found = None
+        for edge in range(row, max(2, row-reach)-1, -1):
+            if edge+2 >= intr.height or not 1 <= col < intr.width-1:
+                continue
+            below = gray[edge:edge+3, col-1:col+2]
+            above = gray[edge-3:edge, col-1:col+2]
+            if abs(float(np.median(below))-float(np.median(above))) < 12:
+                continue
+            if np.count_nonzero(white[edge:edge+3, col-1:col+2]) < 7:
+                continue
+            ray = (col-intr.cx)/intr.fx*right + (edge-intr.cy)/intr.fy*down + ahead
+            denom = float(ray[:2] @ normal)
+            if abs(denom) < 1e-6:
+                continue
+            distance = float((center-origin[:2]) @ normal)/denom
+            point = origin+distance*ray
+            if distance <= 0 or not -.02 <= point[2]-support[index, 2] <= .12:
+                continue
+            edge_seen += 1
+            # 顶边附近常有深度空洞；向上3至12厘米寻找实测背景，不填补空洞。
+            clear = False
+            for rise in (.03, .06, .09, .12):
+                back_row = edge-max(3, int(round(rise*intr.fy/distance)))
+                if back_row < 1:
+                    continue
+                patch = depth[back_row-1:back_row+2, col-1:col+2]
+                if np.count_nonzero(np.isfinite(patch) & (patch > distance+.40)) >= 7:
+                    clear = True
+                    break
+            if not clear:
+                continue
+            background_seen += 1
+            found = point
+            break
+        if found is not None:
+            hits.append(found)
+    detail.update(edge_samples=edge_seen, background_samples=background_seen,
+                  accepted_columns=len(hits))
+    if len(hits) < max(8, .80*len(columns)):
+        return fail('原图边界或后方背景有效列不足80%')
+    hits = np.asarray(hits)
+    height = float(np.median(hits[:, 2]))
+    flat = np.abs(hits[:, 2]-height) <= .03
+    if flat.mean() < .80:
+        return fail('顶边高度不一致')
+    edge = hits[flat]
+    width = float(np.ptp((edge[:, :2]-center) @ axes[0]))
+    if not WIDTH_MIN_M <= width <= WIDTH_MAX_M:
+        return fail('顶边宽度不符')
+    detail['reason'] = '原图顶边及后方背景通过'
+    return height, len(edge)
+
+
 def _far_white_reading(cell, color, white, depth, mask, pose, offset, pitch,
                        intr, roll=0., diagnostic=None):
     """没有顶块锚点时，独立用格内白色深度及上方空域判断一/两层。"""
@@ -1261,19 +1909,74 @@ def _far_white_reading(cell, color, white, depth, mask, pose, offset, pitch,
            &(world[:,2]>=cell.base_z+MIN_VISIBLE_M)&(world[:,2]<=cell.cap_z+.10))
     if own.sum() < 30:
         return fail("格内白盒支撑不足，需要侧向视角")
-    # 深度分离后才做连通域，白墙不会与白盒粘成整片；小孔只用于分组，不补造深度。
-    points = np.zeros(white.shape,np.uint8)
-    points[ys[own],xs[own]] = 1
-    grouped = cv2.morphologyEx(points,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
-    count,labels,stats,_ = cv2.connectedComponentsWithStats(grouped,8)
-    if count < 2:
+    labels, components = _far_spatial_labels(world, own, ys, xs, white.shape)
+    if not components:
         return fail("没有完整白盒支撑，需要侧向视角")
-    component = int(1+np.argmax(stats[1:,4]))
-    own = _far_white_group(world,own,labels,ys,xs,component)
+    if len(components) > 12:
+        return fail("格内独立表面过多，需要侧向视角")
+    candidates, checked = [], set()
+    for component in components:
+        selected = _far_white_group(world, own, labels, ys, xs, component)
+        for face in _vertical_faces(world, selected):
+            key = np.packbits(face).tobytes()
+            if key in checked:
+                continue
+            checked.add(key)
+            detail = {}
+            reading = _far_white_candidate(cell,color,white,depth,mask,pose,offset,
+                pitch,intr,roll,world,face,xs,ys,detail)
+            candidates.append((reading,detail,face))
+    info['spatial_groups'] = len(components)
+    info['faces'] = len(candidates)
+    info['groups'] = [dict(result=None if r is None else r[0], **d)
+                      for r,d,_ in candidates]
+    if not candidates:
+        return fail("格内没有可靠竖直盒面，需要侧向视角")
+    accepted = [(r,d,f) for r,d,f in candidates if r is not None]
+    if not accepted:
+        info.update(candidates[0][1])
+        return None
+    states = {r[0] for r,_,_ in accepted}
+    if len(states)>1:
+        return fail("多个盒面层高冲突，需要侧向视角")
+    # 不挑最容易通过的低面；另一个可信盒面还有更高支撑时必须复核。
+    level = cell.one_z if accepted[0][0][0] == '1' else cell.two_z
+    if any(d.get('width_cm',0)>=WIDTH_MIN_M*100 and
+           d.get('top_height_cm',0)>100*(level+.10) for _,d,_ in candidates):
+        return fail("其他盒面存在更高支撑，不能用低面确定层数，需要侧向视角")
+    combined = np.logical_or.reduce([f for _,_,f in accepted])
+    support = world[combined]
+    xy = support[:,:2]-np.median(support[:,:2],axis=0)
+    _,_,axes = np.linalg.svd(xy,full_matrices=False)
+    width = np.max(np.percentile(xy@axes.T,95,axis=0)-np.percentile(xy@axes.T,5,axis=0))
+    if width>WIDTH_MAX_M:
+        return fail("多个盒面合并宽度超限，需要侧向视角")
+    info.update(accepted[0][1])
+    info['accepted_faces'] = len(accepted)
+    info['support_points'] = len(support)
+    info['support_pixels'] = np.column_stack((xs[combined],ys[combined]))[::max(1,int(combined.sum())//300)].tolist()
+    piece = np.zeros(white.shape,np.uint8)
+    piece[ys[combined],xs[combined]] = 255
+    return accepted[0][0][0], _outline(piece)
+
+
+def _far_white_candidate(cell, color, white, depth, mask, pose, offset,
+                         pitch, intr, roll, world, own, xs, ys, info):
+    def fail(reason):
+        info['reason'] = reason
+        return None
     support = world[own]
     info["support_points"] = len(support)
+    info["support_pixels"] = np.column_stack((xs[own],ys[own]))[::max(1,int(own.sum())//300)].tolist()
     if len(support)<30:
         return fail("白盒有效支撑不足，需要侧向视角")
+    # 搜索余量用于找到候选；独立盒面整体位于塔位外沿时属于背景，
+    # 不能再作为“另一个更高盒面”否决已经核验的目标。
+    x0,x1,y0,y1=cell.search_bounds(0.)
+    centered=((support[:,0]>=x0-.015)&(support[:,0]<=x1+.015)
+              &(support[:,1]>=y0-.015)&(support[:,1]<=y1+.015))
+    if np.mean(centered)<.1:
+        return fail("独立表面位于塔位外侧，仅落入定位搜索余量")
     xy = support[:,:2]-np.median(support[:,:2],axis=0)
     _u,_s,axes = np.linalg.svd(xy,full_matrices=False)
     span = np.percentile(xy@axes.T,95,axis=0)-np.percentile(xy@axes.T,5,axis=0)
@@ -1284,14 +1987,27 @@ def _far_white_reading(cell, color, white, depth, mask, pose, offset, pitch,
                 height_span_cm=span_z*100)
     if not WIDTH_MIN_M<=width<=WIDTH_MAX_M:
         return fail("白盒宽度支撑不足，需要侧向视角")
+    # 保留深度原始顶高供诊断；明暗边界只在可靠盒面和背景证据齐备时补顶。
+    info['depth_top_height_cm'] = float(top)*100
+    rgb_top = None
+    if span_z < .18 or min(abs(top-cell.one_z), abs(top-cell.two_z)) > .08:
+        rgb_top = _far_rgb_top(support, xs[own], ys[own], color, white, depth,
+                               pose, offset, pitch, intr, roll, info.setdefault('rgb_top_check', {}))
+    if rgb_top is not None and rgb_top[0] < top-.02:
+        rgb_top = None
+    if rgb_top is not None:
+        top, edge_columns = rgb_top
+        info.update(rgb_top_height_cm=top*100, rgb_top_columns=edge_columns,
+                    top_height_cm=top*100)
     partial = span_z < .18
     info['partial_body'] = partial
     if partial:
         # 只有顶边确实与后方背景分离，才允许盒底遮挡；小白片不能只靠顶高过关。
         xy = support[:,:2]-np.median(support[:,:2],axis=0)
         plane_error = float(np.percentile(np.abs(xy @ axes[-1]),90))
-        info['top_edge_clear'] = (span_z >= .06 and plane_error <= .035
-            and _far_white_top_edge(support,xs[own],ys[own],depth,intr))
+        info['top_edge_clear'] = (plane_error <= .035 and
+            (rgb_top is not None or (span_z >= .06 and
+             _far_white_top_edge(support,xs[own],ys[own],depth,intr))))
         if not info['top_edge_clear']:
             return fail("白盒高度支撑不足且顶边未分离，需要侧向视角")
     levels = [(abs(top-cell.one_z), "1", cell.one_z),
@@ -1299,7 +2015,7 @@ def _far_white_reading(cell, color, white, depth, mask, pose, offset, pitch,
     error,state,level = min(levels)
     if error>.08:
         return fail("白盒顶高不确定，需要侧向视角")
-    info["upper_clear"] = _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll)
+    info["upper_clear"] = _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,info.setdefault('upper_space',{}))
     if not info["upper_clear"]:
         return fail("未证实白盒上方为空：可能还有上层或顶块，需要侧向视角")
     piece = np.zeros(white.shape,np.uint8)
@@ -1308,6 +2024,572 @@ def _far_white_reading(cell, color, white, depth, mask, pose, offset, pitch,
     info["reason"] = ("格内白盒深度＋分离顶边＋顶高＋上方空域（盒底不完整）"
                       if partial else "格内白盒深度＋顶高＋上方空域")
     return state,_outline(piece)
+
+
+def _resolve_layer_seams(candidates, color, white, mask, cell, pose, offset,
+                         pitch, intr, z_cam, roll=0., depth=None, diagnostic=None):
+    """仅在同帧一/两层证据竞争时，检查低横线是否为同塔盒体的接缝。"""
+    if {item[0] for item in candidates} != {'1', '2'}:
+        return candidates
+    info={'triggered':True,'checks':[],'removed_indices':[],'state':'unresolved'}
+    if diagnostic is not None:
+        diagnostic.update(info)
+        info=diagnostic
+    gray=cv2.cvtColor(color,cv2.COLOR_BGR2GRAY).astype(float)
+    hsv=cv2.cvtColor(color,cv2.COLOR_BGR2HSV)
+    valid_white=(white>0)&(hsv[:,:,1]<=100)&(mask>0)
+    origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+
+    def top_edge(item):
+        # 轮廓可能从左下角开始，不能假定前两个点就是顶边。
+        xy=np.asarray(item[1]).reshape(-1,2)
+        if len(xy)==4:
+            edges=[]
+            for index,a in enumerate(xy):
+                b=xy[(index+1)%len(xy)]
+                dx=float(b[0]-a[0])
+                if abs(dx)>=8 and abs((b[1]-a[1])/dx-np.tan(np.deg2rad(roll)))<=.4:
+                    gravity=(-np.sin(np.deg2rad(roll))*(a[0]+b[0])
+                             +np.cos(np.deg2rad(roll))*(a[1]+b[1]))
+                    edges.append((gravity,a,b))
+            if edges:
+                _,a,b=min(edges,key=lambda q:q[0])
+                a,b=sorted((a,b),key=lambda q:q[0])
+                return np.asarray(a,float),np.asarray(b,float)
+        y=float(xy[:,1].min())
+        top=xy[xy[:,1]<=y+max(3,.02*intr.fy/z_cam)]
+        a,b=top[np.argmin(top[:,0])],top[np.argmax(top[:,0])]
+        return np.asarray(a,float),np.asarray(b,float)
+
+    def world_samples(rows,cols):
+        values=depth[rows,cols].astype(float)
+        good=np.isfinite(values)&(values>=_DEPTH_NEAR_M)
+        if good.sum()<12:
+            return None
+        u,v,d=cols[good],rows[good],values[good]
+        return (origin+((u-intr.cx)*d/intr.fx)[:,None]*right
+                +((v-intr.cy)*d/intr.fy)[:,None]*down+d[:,None]*ahead)
+
+    removed=set()
+    for low_index,low in enumerate(candidates):
+        if low[0]!='1':
+            continue
+        la,lb=top_edge(low)
+        for high_index,high in enumerate(candidates):
+            if high[0]!='2':
+                continue
+            ha,hb=top_edge(high)
+            gap=high[2]-low[2]
+            overlap=min(lb[0],hb[0])-max(la[0],ha[0])
+            width=min(lb[0]-la[0],hb[0]-ha[0])
+            ratio=(lb[0]-la[0])/max(1,hb[0]-ha[0])
+            if not .70<=ratio<=1.40:
+                continue
+            if not .20<=gap<=.50 or width<8 or overlap<.5*width:
+                continue
+            item={'low_index':low_index,'high_index':high_index,
+                  'height_gap_cm':float(gap*100),'overlap':float(overlap/width)}
+            info['checks'].append(item)
+            # 允许上下盒错位12cm，但不把另一个横向分离的背景盒面拼进来。
+            aligned=min(abs(la[0]-ha[0]),abs(lb[0]-hb[0]))*z_cam/intr.fx<=.12
+            if not aligned:
+                item['reason']='侧边横向不对应'
+                continue
+            cols=np.arange(int(max(la[0],ha[0]))+3,int(min(lb[0],hb[0]))-2,dtype=int)
+            if len(cols)<8:
+                continue
+            seam=la[1]+(cols-la[0])*(lb[1]-la[1])/max(1,lb[0]-la[0])
+            upper=ha[1]+(cols-ha[0])*(hb[1]-ha[1])/max(1,hb[0]-ha[0])
+            # 跨过4cm暗缝，检查其上方4~16cm处是否恢复为连续盒面。
+            start=max(4,int(.04*intr.fy/z_cam))
+            stop=max(start+4,int(.16*intr.fy/z_cam))
+            above=np.round(seam[:,None]-np.arange(start,stop)[None,:]).astype(int)
+            below=np.round(seam[:,None]+np.arange(start,stop)[None,:]).astype(int)
+            xx=np.broadcast_to(cols[:,None],above.shape)
+            if (above.min()<3 or below.max()>=intr.height-3
+                    or cols.min()<4 or cols.max()>=intr.width-4
+                    or np.any(above[:,0]<=upper+3)):
+                item['reason']='上下盒面可见支撑不足'
+                continue
+            column_fill=np.mean(valid_white[above,xx],axis=1)
+            fill=float(np.mean(column_fill>=.65))
+            item['upper_face_columns']=fill
+            if fill<.65:
+                item['reason']='跨过缝隙后没有连续上层白面'
+                continue
+            # 同一上层盒面至少一侧从更高候选延续到接缝附近。
+            sides=0
+            for u,top_y in (ha,hb):
+                u=int(round(u))
+                bottom_y=float(la[1]+(u-la[0])*(lb[1]-la[1])/max(1,lb[0]-la[0]))
+                rows=np.arange(int(top_y)+start,int(bottom_y)-start,dtype=int)
+                if not 4<=u<intr.width-4 or len(rows)<6 or rows.min()<0 or rows.max()>=intr.height:
+                    continue
+                contrast=np.abs(gray[rows,u-3]-gray[rows,u+3])
+                if np.mean(contrast>=8)>=.5:
+                    sides+=1
+            item['continued_sides']=sides
+            # 接缝下方也必须仍有本塔盒面；单盒底边上方当然有白面，
+            # 不能因此把真实盒底当作两层接缝。
+            lower_fill=float(np.mean(np.mean(valid_white[below,xx],axis=1)>=.65))
+            lower_sides=0
+            for u,top_y in (la,lb):
+                u=int(round(u))
+                rows=np.arange(int(top_y)+start,int(top_y)+stop,dtype=int)
+                if 4<=u<intr.width-4 and rows.min()>=0 and rows.max()<intr.height:
+                    if np.mean(np.abs(gray[rows,u-3]-gray[rows,u+3])>=8)>=.5:
+                        lower_sides+=1
+            item.update(lower_face_columns=lower_fill,lower_continued_sides=lower_sides)
+            if lower_fill<.65:
+                item['reason']='低横线下方没有连续盒面，可能是真实盒底'
+                continue
+            depth_connected=False
+            if depth is not None:
+                up=world_samples(above.ravel(),xx.ravel())
+                dn=world_samples(below.ravel(),xx.ravel())
+                if up is not None and dn is not None:
+                    x0,x1,y0,y1=cell.search_bounds(MARGIN_M)
+                    def own(points):
+                        return ((points[:,0]>=x0)&(points[:,0]<=x1)
+                                &(points[:,1]>=y0)&(points[:,1]<=y1))
+                    up_own,dn_own=own(up),own(dn)
+                    item['depth_ownership']=[float(up_own.mean()),float(dn_own.mean())]
+                    if up_own.mean()<.6 or dn_own.mean()<.6:
+                        item['reason']='上下深度不属于同塔，保留原判断'
+                        continue
+                    up_mid=np.median(up[up_own],axis=0)
+                    dn_mid=np.median(dn[dn_own],axis=0)
+                    distance=float(np.linalg.norm(up_mid[:2]-dn_mid[:2]))
+                    item['depth_xy_gap_cm']=distance*100
+                    depth_connected=(distance<=.16 and up_mid[2]>dn_mid[2]+.04)
+                    if not depth_connected:
+                        item['reason']='上下实测表面不连续，保留原判断'
+                        continue
+                item['depth_state']='connected' if depth_connected else 'unknown'
+            # 若较高盒面已有完整单盒相对高度，RGB须看到接缝下两侧
+            # 均延续，才推翻它；防止盒底后的台面边缘冒充下层。
+            if high[3] and lower_sides<2 and not depth_connected:
+                item['reason']='完整单盒高度仍成立，下层侧边不足以推翻'
+                continue
+            if (sides==0 or lower_sides==0) and not depth_connected:
+                item['reason']='缺少上下侧边延续或深度连接证据'
+                continue
+            item['reason']='一层横线上方仍是同塔盒面，判为接缝'
+            item['seam']=True
+            removed.add(low_index)
+    info['removed_indices']=sorted(removed)
+    if removed:
+        info['state']='seam_rejected'
+    return [item for index,item in enumerate(candidates) if index not in removed]
+
+
+def _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll=0.):
+    """无上方顶边候选时，也能否决盒面内的接缝；不据此补造两层结果。"""
+    x,y,w,h=cv2.boundingRect(piece)
+    if _metric(w,z_cam,intr.fx)<.20:
+        return False
+    gray=cv2.cvtColor(color,cv2.COLOR_BGR2GRAY).astype(float)
+    cols=np.arange(x+4,x+w-4)
+    rows=y+(cols-(x+w/2))*np.tan(np.deg2rad(roll))
+    start=max(5,int(.05*intr.fy/z_cam))
+    stop=max(start+6,int(.22*intr.fy/z_cam))
+    above=np.round(rows[:,None]-np.arange(start,stop)[None,:]).astype(int)
+    below=np.round(rows[:,None]+np.arange(start,max(start+4,int(.12*intr.fy/z_cam)))[None,:]).astype(int)
+    if not len(cols) or above.min()<4 or below.max()>=intr.height-4:
+        return False
+    valid=(white>0)&(mask>0)
+    if (np.mean(np.mean(valid[above,cols[:,None]],axis=1)>=.75)<.75
+            or np.mean(np.mean(valid[below,cols[:,None]],axis=1)>=.75)<.75):
+        return False
+    # 白墙本身不构成上层盒面：左右两条真实侧边必须向上延续，
+    # 允许上下盒错位8cm；单边、窗框和纯亮度横纹不触发。
+    radius=max(3,int(.08*intr.fx/z_cam))
+    for side,u0 in [('left',x),('right',x+w-1)]:
+        found=False
+        for u in range(max(4,u0-radius),min(intr.width-4,u0+radius+1)):
+            top=y+(u-(x+w/2))*np.tan(np.deg2rad(roll))
+            rr=np.round(top-np.arange(start,stop)).astype(int)
+            inner=u+3 if side=='left' else u-3
+            if (np.mean(np.abs(gray[rr,u-3]-gray[rr,u+3])>=8)>=.7
+                    and np.mean(valid[rr,inner])>=.75):
+                found=True
+                break
+        if not found:
+            return False
+    return True
+
+
+def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,diagnostic=None,depth=None):
+    """从真实顶边和局部盒面生成候选，不要求可见盒底或独立白色连通块。"""
+    info={'checks':[]}
+    if diagnostic is not None:
+        diagnostic['rgb_white_top']=info
+    gray=cv2.cvtColor(color,cv2.COLOR_BGR2GRAY)
+    hsv=cv2.cvtColor(color,cv2.COLOR_BGR2HSV)
+    edges=cv2.Canny(gray,18,50)
+    # 饱和颜色不是白盒边；同时避免录屏中彩色框线成为几何证据。
+    ink=cv2.dilate((hsv[:,:,1]>100).astype(np.uint8),np.ones((5,5),np.uint8))
+    edges[(mask==0)|(ink>0)]=0
+    min_length=max(10,int(.12*intr.fx/z_cam))
+    full_length=max(12,int(.16*intr.fx/z_cam))
+    lines=cv2.HoughLinesP(edges,1,np.pi/180,threshold=max(10,full_length//2),
+                          minLineLength=full_length,maxLineGap=4)
+    short=cv2.HoughLinesP(edges,1,np.pi/180,threshold=max(10,min_length//2),
+                         minLineLength=min_length,maxLineGap=4)
+    if short is not None:
+        lines=short if lines is None else np.concatenate((lines.reshape(-1,4),short.reshape(-1,4)))
+    bridged=cv2.HoughLinesP(edges,1,np.pi/180,threshold=max(10,full_length//4),
+                           minLineLength=full_length,maxLineGap=max(4,int(.05*intr.fx/z_cam)))
+    if bridged is not None:
+        lines=bridged if lines is None else np.concatenate((lines.reshape(-1,4),bridged.reshape(-1,4)))
+    # Hough会随搜索掩膜内其它边缘的增减而漏掉同一条顶边。小roll时
+    # 再逐行收集已有边缘的连续横段；不创造边缘，后续仍核验盒面和侧边。
+    if abs(roll)<3:
+        joined=cv2.dilate(edges,np.ones((3,1),np.uint8))
+        joined=cv2.morphologyEx(joined,cv2.MORPH_CLOSE,np.ones((1,9),np.uint8))
+        transitions=np.diff(np.pad(joined>0,((0,0),(1,1))).astype(np.int8),axis=1)
+        yy,starts=np.nonzero(transitions==1)
+        end_y,ends=np.nonzero(transitions==-1)
+        spans=[]
+        for row,left,right in zip(yy,starts,ends):
+            if row%2==0 and right-left>=full_length:
+                spans.append([left,row,right-1,row])
+        if spans:
+            extra=np.asarray(spans,np.int32)
+            lines=extra if lines is None else np.concatenate((lines.reshape(-1,4),extra))
+    if lines is None:
+        return None
+    candidates=[]
+    pending=[]
+    band=max(8,int(.12*intr.fy/z_cam))
+    # 绝对顶高由格心距离反投影，前侧盒面及小角度姿态误差会随距离
+    # 放大。留出1.2度角误差及4cm近面误差，上限14cm仍小于半个层高；
+    # 顶边、侧边、连续盒面及深度归属的核验继续独立执行。
+    height_tolerance=max(.075,min(.14,.04+z_cam*np.tan(np.deg2rad(1.2))))
+    info['height_tolerance_cm']=height_tolerance*100
+    for x0,y0,x1,y1 in lines.reshape(-1,4):
+        if x1<x0:
+            x0,y0,x1,y1=x1,y1,x0,y0
+        w=int(x1-x0)
+        if w<min_length or abs((y1-y0)/max(1,w)-np.tan(np.deg2rad(roll)))>.25:
+            continue
+        if not .12<=_metric(w,z_cam,intr.fx)<=.65:
+            continue
+        z=_z_at_cell(cell,(x0+x1)/2,(y0+y1)/2,pose,offset,pitch,intr,roll)
+        if z is None:
+            continue
+        state,level=min([('1',cell.one_z),('2',cell.two_z)],key=lambda item:abs(item[1]-z))
+        if abs(z-level)>height_tolerance:
+            continue
+        # 盒顶在其50cm占地内的投影，而非搜索框内任意同高度线段。
+        projected=[project(np.array([xx,yy,level]),pose,offset,pitch,intr,roll)
+                   for xx in (cell.x-.25,cell.x+.25) for yy in (cell.y-.25,cell.y+.25)]
+        projected=[q for q in projected if q is not None]
+        if not projected or not min(q[0] for q in projected)-3<=(x0+x1)/2<=max(q[0] for q in projected)+3:
+            continue
+        cols=np.arange(x0+3,x1-2,dtype=int)
+        rows=np.round(y0+(cols-x0)*(y1-y0)/w).astype(int)
+        if len(cols)<8 or rows.min()<5 or rows.max()+band+3>=intr.height:
+            continue
+        below=rows[:,None]+np.arange(3,band+3)[None,:]
+        valid_face=ink[below,cols[:,None]]==0
+        if np.mean(valid_face)<.5:
+            continue
+        inside_white=white[below,cols[:,None]]>0
+        fill=float(np.mean(inside_white[valid_face]))
+        contrast=np.abs(gray[rows+3,cols].astype(float)-gray[rows-3,cols].astype(float))
+        edge_support=float(np.mean(contrast>=8))
+        if fill<.75 or edge_support<.5:
+            continue
+        # 白盒接缝不是顶边：上方连续白面、且亮度相近时不接受。
+        above=rows[:,None]-np.arange(4,band+4)[None,:]
+        above_white=float(np.mean(white[above,cols[:,None]]>0))
+        above_gray=float(np.median(gray[above,cols[:,None]]))
+        below_gray=float(np.median(gray[below,cols[:,None]]))
+        if above_white>.5 and abs(above_gray-below_gray)<12:
+            continue
+        # 顶边可能被纹理/叠字分成短段，沿两端寻找真实向下侧边，
+        # 不能把Hough短段的端点直接当成盒子左右边。
+        extent=max(8,int(.22*intr.fx/z_cam))
+        side_cols=[]
+        for side,start,end,step in [('left',int(x0)+3,max(4,int(x0)-extent),-1),
+                                     ('right',int(x1)-3,min(intr.width-5,int(x1)+extent),1)]:
+            found=None
+            for u in range(start,end,step):
+                v=int(round(y0+(u-x0)*(y1-y0)/w))
+                if not 5<=u<intr.width-5 or v+band+3>=intr.height or v<0:
+                    continue
+                a=gray[v+3:v+band+3,u-3].astype(float)
+                b=gray[v+3:v+band+3,u+3].astype(float)
+                inner=u+3 if side=='left' else u-3
+                body=white[v+3:v+band+3,inner]>0
+                strength=float(np.mean(np.abs(a-b)>=8))
+                if strength>=.65 and np.mean(body)>=.65:
+                    found=u
+                    break
+            side_cols.append(found)
+        check=dict(state=state,top_cm=z*100,line=[int(x0),int(y0),int(x1),int(y1)],
+                   fill=fill,edge_support=edge_support,sides=sum(q is not None for q in side_cols))
+        info['checks'].append(check)
+        if all(q is None for q in side_cols):
+            continue
+        if check['sides']==1 and edge_support<(.8 if _metric(w,z_cam,intr.fx)<.23 else .6):
+            continue
+        # 一条真实侧边加连续顶边也可定位局部盒面；未见侧不能伪称完整边。
+        left=side_cols[0] if side_cols[0] is not None else int(x0)
+        right=side_cols[1] if side_cols[1] is not None else int(x1)
+        if right-left<w*.8 or not .12<=_metric(right-left,z_cam,intr.fx)<=.65:
+            continue
+        if all(q is not None for q in side_cols) and _metric(right-left,z_cam,intr.fx)<.12:
+            continue
+        face_cols=np.arange(left+3,right-2,dtype=int)
+        face_rows=np.round(y0+(face_cols-x0)*(y1-y0)/w).astype(int)
+        face_below=face_rows[:,None]+np.arange(3,band+3)[None,:]
+        valid=ink[face_below,face_cols[:,None]]==0
+        face=(white[face_below,face_cols[:,None]]>0)&(mask[face_below,face_cols[:,None]]>0)
+        if np.mean(valid)<.5 or np.mean(face[valid])<.75:
+            continue
+        column_valid=valid.sum(axis=1)
+        continuous=(face & valid).sum(axis=1)/np.maximum(1,column_valid)
+        usable_columns=column_valid>=.5*valid.shape[1]
+        if not usable_columns.any() or np.mean(continuous[usable_columns]>=.75)<.75:
+            continue
+        # 短白条、窗框和印字也可能恰好落在预期顶高处。顶边下方应有
+        # 至少半个盒高的连续盒面，而不只是12cm的浅色条带。
+        support_band=max(band,int(.16*intr.fy/z_cam))
+        if face_rows.max()+support_band+3>=intr.height:
+            continue
+        support_rows=face_rows[:,None]+np.arange(3,support_band+3)[None,:]
+        support_valid=ink[support_rows,face_cols[:,None]]==0
+        reference=np.median(gray[face_below,face_cols[:,None]][valid])
+        face_consistent=((white[support_rows,face_cols[:,None]]>0)
+                         &(np.abs(gray[support_rows,face_cols[:,None]].astype(float)-reference)<28))
+        if np.mean(support_valid)<.5 or np.mean(face_consistent[support_valid])<.8:
+            continue
+        check['side_columns']=[left,right]
+        check['complete_sides']=all(q is not None for q in side_cols)
+        # 完整盒面的底边提供相对高度，抵消相机姿态/实际支撑面造成的
+        # 绝对顶高偏移。底部被遮住时不从可见短段反推层数。
+        if check['complete_sides'] and abs(roll)<15:
+            bottom_evidence=[]
+            top_gray=gray[face_below,face_cols[:,None]].astype(float)
+            reference=np.median(top_gray,axis=1)
+            max_drop=min(intr.height-5-int(face_rows.max()),int(.82*intr.fy/z_cam))
+            for drop in range(band+5,max_drop):
+                rr=face_rows+drop
+                a=gray[rr-3,face_cols].astype(float)
+                b=gray[rr+3,face_cols].astype(float)
+                # 底边上侧应仍是这一盒面，下侧必须离开盒面；连续白色
+                # 且同亮度的接缝不构成底边证据。
+                same_above=np.abs(a-reference)<18
+                leaves_face=np.abs(b-reference)>=18
+                usable=ink[rr-3,face_cols]==0
+                # 深色前景挡住下半塔时，这条横线是遮挡边而不是盒底。
+                below_visible=b>=90
+                support=np.mean(same_above & leaves_face & (np.abs(a-b)>=12) & usable & below_visible)
+                if support<.7:
+                    continue
+                bottom_z=_z_at_cell(cell,float(np.median(face_cols)),float(np.median(rr)),
+                                       pose,offset,pitch,intr,roll)
+                if bottom_z is None or bottom_z<cell.base_z-.12:
+                    continue
+                height=z-bottom_z
+                # 横线下方仍有同亮度白面时，它更可能是上下盒接缝。
+                below_span=max(6,int(.10*intr.fy/z_cam))
+                below_rows=rr[:,None]+np.arange(4,below_span+4)[None,:]
+                if below_rows.max()<intr.height:
+                    lower_gray=gray[below_rows,face_cols[:,None]].astype(float)
+                    continues_white=((white[below_rows,face_cols[:,None]]>0)
+                                     &(np.abs(lower_gray-reference[:,None])<28))
+                    if np.mean(continues_white)>.5:
+                        continue
+                # 两侧都必须在底边结束；只有一侧结束时，仍可能是接缝或遮挡边。
+                continued=[]
+                for u in (left,right):
+                    v=int(round(y0+(u-x0)*(y1-y0)/w))+drop+5
+                    if v+band>=intr.height:
+                        continued.append(True)
+                    else:
+                        continued.append(np.mean(np.abs(gray[v:v+band,u-3].astype(float)
+                            -gray[v:v+band,u+3].astype(float))>=8)>.65)
+                if any(continued):
+                    continue
+                relative=min((1,2),key=lambda n:abs(height-.35*n))
+                if abs(height-.35*relative)<=.065:
+                    bottom_evidence.append((support,relative,height,bottom_z))
+            if bottom_evidence:
+                _,relative,height,bottom_z=max(bottom_evidence,key=lambda q:q[0])
+                check.update(absolute_state=state,body_height_cm=height*100,
+                             bottom_cm=bottom_z*100,relative_state=str(relative))
+                state=str(relative)
+                level=cell.one_z if state=='1' else cell.two_z
+        # 窄而两侧闭合的小白面易来自椅腿/窗框。它若没有盒底证据，
+        # 不能冒充完整盒体；单侧出画及有真实底边的半盒仍允许。
+        if (check['complete_sides'] and _metric(right-left,z_cam,intr.fx)<.23
+                and 'relative_state' not in check):
+            continue
+        ly=int(round(y0+(left-x0)*(y1-y0)/w))
+        ry=int(round(y0+(right-x0)*(y1-y0)/w))
+        piece=np.array([[[left,ly]],[[right,ry]],[[right,ry+band]],[[left,ly+band]]],np.int32)
+        pending.append((state,piece,z,'relative_state' in check,check,face_cols,face_rows,face_below))
+    absolute=[(q[4]['state'],q[1],q[2],q[3] and q[0]!=q[4]['state']) for q in pending]
+    arbitration={}
+    if {q[0] for q in absolute}=={'1','2'}:
+        _resolve_layer_seams(absolute,color,white,mask,cell,pose,offset,pitch,intr,
+                             z_cam,roll,depth,arbitration)
+        info['seam_conflict']=arbitration
+    removed=set(arbitration.get('removed_indices',[]))
+    confirmed_high={q['high_index'] for q in arbitration.get('checks',[]) if q.get('seam')}
+    for index,(state,piece,z,relative,check,cols,face_rows,below) in enumerate(pending):
+        if index in removed:
+            check['seam_rejected']=True
+            continue
+        if index in confirmed_high:
+            state='2'
+            # 盒面中的横线已证实是接缝，不能再用它充当底边把两层缩为一层。
+            relative=False
+            check['seam_restored_state']='2'
+        level=cell.one_z if state=='1' else cell.two_z
+        if depth is not None:
+            yy,xx=below.ravel(),np.broadcast_to(cols[:,None],below.shape).ravel()
+            values=depth[yy,xx].astype(float)
+            good=np.isfinite(values)&(values>=_DEPTH_NEAR_M)
+            if good.sum()>=12:
+                values,xx,yy=values[good],xx[good],yy[good]
+                origin,cam_right,down,ahead=camera_frame(pose,offset,pitch,roll)
+                world=(origin+((xx-intr.cx)*values/intr.fx)[:,None]*cam_right
+                       +((yy-intr.cy)*values/intr.fy)[:,None]*down+values[:,None]*ahead)
+                bx0,bx1,by0,by1=cell.search_bounds(MARGIN_M)
+                own=((world[:,0]>=bx0)&(world[:,0]<=bx1)&(world[:,1]>=by0)&(world[:,1]<=by1)
+                     &(world[:,2]<=level+.08)&(world[:,2]>=level-.22))
+                check['depth_support']=float(np.mean(own))
+                if np.mean(own)<.7:
+                    continue
+            elif z_cam<=_DEPTH_FAR_M:
+                continue
+            # 提供了深度时，缺失的上层不能被RGB色差伪装为空域。
+            if not _rgb_upper_consistent(cell,level,pose,offset,pitch,intr,depth,roll,
+                                      check.setdefault('upper_space',{})):
+                continue
+            if check['upper_space'].get('state')=='unknown':
+                top_values=depth[face_rows[:,None]+np.arange(1,5)[None,:],cols[:,None]]
+                measured_top=np.isfinite(top_values)&(top_values>z_cam-.5)&(top_values<z_cam+.5)
+                body_measured=((mask>0)&np.isfinite(depth)&(depth>z_cam-.5)&(depth<z_cam+.5))
+                if np.count_nonzero(measured_top)<5 and np.any(body_measured):
+                    check['depth_state']='body_only_without_top_or_upper'
+                    continue
+        candidates.append((state,piece,z,relative))
+    # 两层的真实顶边优先于下方接缝；几何验证不通过的线段不进入比较。
+    info['candidates']=len(candidates)
+    if not candidates:
+        return None
+    chosen=max(candidates,key=lambda item:(item[3],item[2]))
+    info['state']=chosen[0]
+    return chosen[:2]
+
+
+def _rgb_white_edges(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,diagnostic=None,depth=None):
+    """用实际灰度边界拆开同为白色的盒面与背景；不以搜索框裁切边当盒边。"""
+    info = {'candidates': 0}
+    if diagnostic is not None:
+        diagnostic['rgb_white_edges'] = info
+    gray = cv2.cvtColor(color,cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray,20,60)
+    barrier = cv2.dilate(edges,np.ones((3,3),np.uint8))
+    separated = ((white>0)&(mask>0)&(barrier==0)).astype(np.uint8)
+    count,labels,stats,_ = cv2.connectedComponentsWithStats(separated,8)
+    candidates = []
+    for i in range(1,count):
+        x,y,w,h,pixels = map(int,stats[i])
+        if pixels<30 or w<8 or h<8 or pixels<.60*w*h:
+            continue
+        side_cut=x<=1 or x+w>=intr.width-1
+        if y<5 or y+h>=intr.height-5:
+            continue
+        if side_cut and _side_visibility(cell,x,w,pose,offset,pitch,intr,
+                                         (cell.base_z+cell.one_z)/2,.35,roll)<.3:
+            continue
+        if not side_cut and (x<5 or x+w>=intr.width-5):
+            continue
+        if not (.12<=_metric(w,z_cam,intr.fx)<=.65):
+            continue
+        # 分割会向内缩1至3像素，用边缘带恢复盒体的完整边界。
+        x0,x1,y0,y1 = max(0,x-2),min(intr.width,x+w+2),y-2,y+h+2
+        if np.mean(mask[y0:y1,x0:x1]>0)<.5:
+            continue
+        strengths = []
+        for side in ('top','bottom','left','right'):
+            if (side=='left' and x<=1) or (side=='right' and x+w>=intr.width-1):
+                continue
+            if side in ('top','bottom'):
+                row = y0 if side=='top' else y1
+                a=gray[row-3,x:x+w].astype(float)
+                b=gray[row+3,x:x+w].astype(float)
+            else:
+                col = x0 if side=='left' else x1
+                a=gray[y:y+h,col-3].astype(float)
+                b=gray[y:y+h,col+3].astype(float)
+            strengths.append(float(np.mean(np.abs(a-b)>=10)))
+        if strengths[0]<.7 or sum(q>=.65 for q in strengths)<2:
+            continue
+        # 连续白面上的亮度接缝不能作为盒顶，缺测也不能把接缝变成顶边。
+        above=gray[max(0,y0-6):y0-2,x:x+w]
+        below=gray[y0+2:min(intr.height,y0+6),x:x+w]
+        if (above.size and below.size
+                and np.mean(white[max(0,y0-6):y0-2,x:x+w]>0)>.8
+                and abs(float(np.median(above))-float(np.median(below)))<12):
+            continue
+        lookback=max(8,int(.10*intr.fy/z_cam))
+        upper_body=gray[max(0,y0-lookback):max(0,y0-6),x:x+w]
+        if (upper_body.size and below.size
+                and np.mean(np.abs(upper_body.astype(float)-float(np.median(below)))<12)>.55):
+            continue
+        top = _z_at_cell(cell,(x0+x1)/2,y0,pose,offset,pitch,intr,roll)
+        bottom = _z_at_cell(cell,(x0+x1)/2,y1,pose,offset,pitch,intr,roll)
+        if top is None or bottom is None or abs(bottom-cell.base_z)>.15:
+            continue
+        levels=[(state,z) for state,z in [('1',cell.one_z),('2',cell.two_z)]
+                if abs(top-z)<=.09]
+        if len(levels)!=1:
+            continue
+        part=np.zeros(mask.shape,np.uint8)
+        part[y0:y1,x0:x1]=255
+        candidates.append((levels[0][0],_outline(part),strengths,top,bottom))
+    info['candidates']=len(candidates)
+    if len(candidates)!=1:
+        info['reason']='没有唯一且四边、顶底高度完整的RGB盒面'
+        return None
+    state,piece,strengths,top,bottom=candidates[0]
+    info.update(edge_coverage=strengths,top_cm=top*100,bottom_cm=None if bottom is None else bottom*100)
+    if depth is not None:
+        region=np.zeros(mask.shape,np.uint8)
+        cv2.drawContours(region,[piece],-1,255,-1)
+        ys,xs=np.nonzero((region>0)&(white>0)&np.isfinite(depth)&(depth>=_DEPTH_NEAR_M))
+        if len(xs)<12:
+            info['depth_state']='unknown'
+            return (state,piece) if _rgb_upper_consistent(cell,top,pose,offset,pitch,intr,depth,roll,info.setdefault('upper_space',{})) else None
+        values=depth[ys,xs].astype(float)
+        origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+        world=(origin+((xs-intr.cx)*values/intr.fx)[:,None]*right
+               +((ys-intr.cy)*values/intr.fy)[:,None]*down+values[:,None]*ahead)
+        x0,x1,y0,y1=cell.search_bounds(MARGIN_M)
+        own=((world[:,0]>=x0)&(world[:,0]<=x1)&(world[:,1]>=y0)&(world[:,1]<=y1)
+             &(world[:,2]>=cell.base_z-.06)&(world[:,2]<=top+.06))
+        info['depth_coverage']=float(np.mean(own))
+        level=cell.one_z if state=='1' else cell.two_z
+        upper=info.setdefault('upper_space',{})
+        _rgb_upper_consistent(cell,level,pose,offset,pitch,intr,depth,roll,upper)
+        # 盒身有深度，但顶边和上方同时缺测，不能将中间接缝补成顶边。
+        px,py,pw,ph=cv2.boundingRect(piece)
+        top_patch=depth[py:min(py+6,depth.shape[0]),px:px+pw]
+        top_valid=np.isfinite(top_patch)&(top_patch>z_cam-.5)&(top_patch<z_cam+.5)
+        if upper.get('state')=='unknown' and np.count_nonzero(top_valid)<5:
+            info['reason']='盒身有深度，但顶边与上方同时缺测'
+            return None
+        if np.mean(own)<.6 or not _rgb_upper_consistent(cell,level,pose,offset,pitch,intr,depth,roll,info.setdefault('upper_space',{})):
+            info['reason']='RGB边界未通过深度归属或上方空间核验'
+            return None
+    return state,piece
 
 
 def _far_reading(
@@ -1401,6 +2683,7 @@ def _classify_cell(
     pieces: list | None = None,
     roll: float = 0.0,
     floor: np.ndarray | None = None,
+    cap_assignment=None,
 ) -> CellView:
     in_view, needs_yaw, needs_pitch = _view_flags(cell, pose, offset, pitch, intr, roll)
     # 一层只露出不到 8 cm 时，这一档不能写成空，也不能写成一层。
@@ -1411,12 +2694,75 @@ def _classify_cell(
     mask = _mask(cell, pose, offset, pitch, intr, roll)
     region = _outline(mask)
     reason = None
-    diagnostic = {}
+    diagnostic = {"roll_deg": float(roll), "pitch_deg": float(pitch)}
+    if cap_assignment is not None:
+        diagnostic['_cap_allowed'],diagnostic['_cap_suspected_allowed'],diagnostic['cap_ownership']=cap_assignment
     rgb_cap = None
+    rgb_structure = None
+    rgb_top_structure = None
+    view_distance = float(np.linalg.norm(camera_position(pose,offset,pitch)[:2]-[cell.x,cell.y]))
 
     def pack(conclusion, frac: float, mean_v: float, piece=None, method=None, hold=False, skip=False) -> CellView:
         # 深度已经量到、彩色又没把整块看全的格，先留在这里记满 15 帧。
         shown_reason = reason
+        if (depth is None and conclusion in ('1','2') and piece is not None
+                and method in ('彩色','黄地','远处')):
+            # 只按像素轮廓高度估层数，会把窗边小白块碰巧判成一层。
+            # 还要核对这块轮廓的实际顶边确实落在对应塔高附近。
+            xy=np.asarray(piece).reshape(-1,2)
+            top_row=float(np.min(xy[:,1]))
+            top_x=float(np.median(xy[xy[:,1]<=top_row+3,0]))
+            measured=_z_at_cell(cell,top_x,top_row,pose,offset,pitch,intr,roll)
+            expected=cell.one_z if conclusion=='1' else cell.two_z
+            diagnostic['rgb_contour_top_cm']=None if measured is None else measured*100
+            tolerance=max(.18,.5*(expected-cell.base_z))
+            if measured is None or abs(measured-expected)>tolerance:
+                diagnostic['rgb_contour_rejected']=conclusion
+                conclusion,piece,method=None,None,None
+                shown_reason='RGB轮廓顶高不符：可能识别到背景白块'
+        if rgb_cap is None and method!='深度':
+            rgb_options=[]
+            if conclusion in ('1','2') and piece is not None:
+                rgb_options.append((conclusion,piece))
+            rgb_options += [q for q in (rgb_top_structure,rgb_structure) if q is not None]
+            if {q[0] for q in rgb_options}=={'1','2'}:
+                contenders=[]
+                for state,outline in rgb_options:
+                    xy=np.asarray(outline).reshape(-1,2)
+                    row=float(xy[:,1].min())
+                    u=float(np.median(xy[xy[:,1]<=row+3,0]))
+                    height=_z_at_cell(cell,u,row,pose,offset,pitch,intr,roll)
+                    if height is not None:
+                        contenders.append((state,outline,height,False))
+                arbitration={}
+                resolved=_resolve_layer_seams(contenders,color,white,mask,cell,pose,
+                    offset,pitch,intr,z_cam,roll,depth,arbitration)
+                if arbitration.get('triggered'):
+                    diagnostic['rgb_layer_conflict']=arbitration
+                if arbitration.get('removed_indices'):
+                    best=max(resolved,key=lambda q:q[2])
+                    conclusion,piece=best[:2]
+                    method,hold,skip='RGB接缝仲裁',True,False
+                    shown_reason=None
+        if (rgb_top_structure is not None
+                and (rgb_structure is None or (rgb_top_structure[0]=='2' and rgb_structure[0]=='1'))
+                and (conclusion is None or (depth is None and conclusion in ('1','2')
+                                           and rgb_top_structure[0]!=conclusion))):
+            conclusion,piece=rgb_top_structure
+            method,hold,skip='RGB局部盒面',True,False
+            shown_reason=None
+        if conclusion is None and rgb_structure is not None:
+            conclusion,piece = rgb_structure
+            method,hold,skip = 'RGB盒体边界',True,False
+            shown_reason = None
+        if (depth is None and conclusion=='1' and piece is not None
+                and _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll)):
+            diagnostic['rgb_single_seam_rejected']=True
+            conclusion,piece,method,hold,skip=None,None,None,False,True
+            shown_reason='横线上方仍有连续盒面和两侧边：接缝不能作为一层盒顶'
+        if conclusion is None and view_distance<1.1 and needs_pitch:
+            diagnostic['needs_standoff'] = True
+            shown_reason = '近处竖直视野不足：先调整俯仰，仍无法看全时后退换位；' + (reason or '')
         diagnostic['white_reading'] = dict(
             result=conclusion if conclusion in ('1', '2') else None,
             method=method, reason=reason)
@@ -1425,10 +2771,22 @@ def _classify_cell(
         if rgb_cap is not None:
             # 顶块与白盒都运行检测；白盒失败不能否定独立通过校验的顶块。
             conclusion, piece = rgb_cap
-            method, hold, skip = 'RGB顶块', False, False
-        if conclusion is None and diagnostic.get("needs_parallax"):
+            method, hold, skip = 'RGB顶块', True, False
+        elif ((diagnostic.get('rgb_cap', {}).get('state') == 'suspected'
+               or diagnostic.get('upper_object'))
+              and conclusion not in ('红', '蓝')):
+            # 各白盒/深度/空点路径统一仲裁；可信顶块待确认时禁止降级。
+            diagnostic['cap_blocks_white'] = True
+            conclusion, piece, method, hold, skip = None, None, None, False, True
+            shown_reason = ('上层物体待确认：深度证实两层以上仍有物体，禁止回退为白盒层数'
+                            if diagnostic.get('upper_object') else
+                            '疑似顶块待确认：禁止回退为白盒层数或空点')
+        if (conclusion is None and diagnostic.get("needs_parallax")
+                and not diagnostic.get('cap_blocks_white')):
             detail = diagnostic.get("far_white", {}).get("reason", "证据不足，需要侧向视角")
             shown_reason = detail + (("；" + reason) if reason else "")
+        diagnostic.pop('_cap_allowed',None)
+        diagnostic.pop('_cap_suspected_allowed',None)
         return CellView(
             conclusion,
             True if hold else in_view,
@@ -1460,20 +2818,45 @@ def _classify_cell(
     cam = to_camera(cell.center(cell.one_z), pose, offset, pitch, roll)
     z_cam = float(cam[2])
     color_usable = in_view and z_cam > 0.2
-    if color_usable:
+    if z_cam>.2 and np.count_nonzero(mask)>=30:
         rgb_cap = _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr,
                                    z_cam, roll, diagnostic)
+    if z_cam>.2 and not in_view:
+        rgb_structure=_rgb_white_edges(cell,color,white,mask,pose,offset,pitch,
+                                       intr,z_cam,roll,diagnostic,depth)
+    if z_cam>.2:
+        rgb_top_structure=_rgb_white_top(cell,color,white,mask,pose,offset,pitch,
+                                         intr,z_cam,roll,diagnostic,depth)
     clipped = False
     overwide = False
     missed_shape = False
     missed_width = False
     covered = False
     occludes, holds = (False, False)
-    if depth is not None and _depth_in_range(z_cam):
-        occludes, holds = _tower_clutter(cell, depth, mask, pose, offset, pitch, intr, roll)
+    if depth is not None:
+        occludes, holds = _tower_clutter(cell, depth, mask, pose, offset, pitch, intr, roll, diagnostic, color)
+    near_depth_result=None
+    if depth is not None and .2<z_cam<=_DEPTH_FAR_M:
+        near_depth_result=_depth_on_cell(cell,cloud,mask,intr,color,blocked,labels,
+            pose,offset,pitch,roll,diagnostic=diagnostic,depth=depth)
+        state,piece,_,unclear=near_depth_result
+        if state is not None and not unclear:
+            # 分离后的本塔深度是主判。搜索区底部杂物及RGB轮廓破损不否决它。
+            return pack(state,frac,mean_v,piece,"深度",hold=True)
+    side_white = bool(np.any((mask[:,0]>0)&(white[:,0]>0))
+                      or np.any((mask[:,-1]>0)&(white[:,-1]>0)))
+    if side_white and depth is None and rgb_structure is None and z_cam>.2:
+        rgb_structure=_rgb_white_edges(cell,color,white,mask,pose,offset,pitch,
+                                       intr,z_cam,roll,diagnostic)
+    if occludes or blocked or side_white:
+        partial=_upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll,diagnostic)
+        if partial is not None:
+            state,piece=partial
+            return pack(state,frac,mean_v,piece,"上部盒面",hold=True)
     if occludes:
         # 箱子或杂物挡在这块塔的画面里。不写成层数，也不写成空，这一帧不计票。
         reason = "前景遮挡：近处杂物盖住建塔区域"
+        diagnostic['needs_parallax'] = True
         return pack(None, frac, mean_v, skip=True)
     if z_cam > _DEPTH_FAR_M and color_usable:
         far_cap = None if rgb_cap is not None else _far_cap_reading(
@@ -1486,6 +2869,9 @@ def _classify_cell(
         if far_white is not None:
             state,piece = far_white
             return pack(state,frac,mean_v,piece,"远处白盒")
+        # RGB拆分粘连盒面；有深度时仍必须通过归属及上方空间核验。
+        rgb_structure = _rgb_white_edges(cell,color,white,mask,pose,offset,pitch,
+                                         intr,z_cam,roll,diagnostic,depth)
         if frac >= .05:
             diagnostic["needs_parallax"] = True
     accepted: list[tuple] = []
@@ -1505,10 +2891,10 @@ def _classify_cell(
             touches_side = x <= 1 or x + w >= intr.width - 1
             touches_top = y <= 1
             touches_bottom = y + h >= intr.height - 1
-            if _metric(w, z_cam, intr.fx) > WIDTH_MAX_M:
-                overwide = True
-            # 顶或左右出画就量不准。底边出画时顶边还在，层高改由顶边来算。
-            if touches_side or touches_top or overwide:
+            component_overwide = _metric(w, z_cam, intr.fx) > WIDTH_MAX_M
+            overwide = overwide or component_overwide
+            # 背景候选过宽，不连带排除后面的正常白盒。
+            if touches_side or touches_top or component_overwide:
                 clipped = True
                 continue
             if not color_usable:
@@ -1544,10 +2930,10 @@ def _classify_cell(
             accepted.append((x, y, w, h, distance, component, top_z))
     diagnostic['white_candidates'] = [_outline(item[5].astype(np.uint8)*255)
                                        for item in accepted] if rgb_cap is not None else []
-    depth_state, depth_piece, saw_outside, cap_unclear = _depth_on_cell(
+    depth_state, depth_piece, saw_outside, cap_unclear = (near_depth_result if near_depth_result is not None else _depth_on_cell(
         cell, cloud, mask, intr, color, blocked, labels, pose, offset, pitch, roll,
-        diagnostic=diagnostic,
-    )
+        diagnostic=diagnostic, depth=depth,
+    ))
     reason = diagnostic.get("reason")
     if cap_unclear:
         return pack(None, frac, mean_v, depth_piece)
@@ -1705,9 +3091,11 @@ def inspect_frame(
         white, floor = _split_white(color)
         labels, pieces = _white_pieces(white)
     cloud = None if color is None else _white_cloud(color, depth, pose, offset, pitch, intr, roll)
+    cells=list(tower_cells())
+    assignments={} if color is None else _assign_caps(cells,color,pose,offset,pitch,intr,roll,depth)
     return {
         cell.name: _classify_cell(
-            cell, pose, offset, pitch, intr, color, depth, cloud, labels, pieces, roll, floor
+            cell, pose, offset, pitch, intr, color, depth, cloud, labels, pieces, roll, floor, assignments.get(cell.name)
         )
-        for cell in tower_cells()
+        for cell in cells
     }

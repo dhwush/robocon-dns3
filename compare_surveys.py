@@ -7,7 +7,8 @@ from pathlib import Path
 def frontier(rows):
     """只淘汰两项均不优、且至少一项更差的方案；不隐含任意权重。"""
     return [row for row in rows if not any(
-        other['distance_m'] <= row['distance_m']
+        other.get('observation_unit', 'legacy') == row.get('observation_unit', 'legacy')
+        and other['distance_m'] <= row['distance_m']
         and other['observation_count'] <= row['observation_count']
         and (other['distance_m'] < row['distance_m']
              or other['observation_count'] < row['observation_count'])
@@ -33,9 +34,10 @@ def main():
         print('暂无带路程和观测次数的完整实测记录。')
         return
     best = frontier(rows)
-    print('仅比较相同场地、起点和物体布置的轮次；★为两项指标未被其他轮次同时超过的候选。')
+    print('仅在相同观测计数口径内比较相同场地、起点和物体布置的轮次；★为两项指标未被其他轮次同时超过的候选。')
     for row in sorted(rows, key=lambda r: (r['observation_count'], r['distance_m'])):
-        print(f"{'★' if row in best else ' '} {row['observation_count']}次  {row['distance_m']:.3f}米  {row['report']}")
+        unit = '完整姿态' if row.get('observation_unit') == 'settled_pose' else '旧口径'
+        print(f"[{unit}] {'★' if row in best else ' '} {row['observation_count']}次  {row['distance_m']:.3f}米  {row['report']}")
     print('路程为有效位姿折线累计值，含定位噪声；候选是已测轮次中的较优解。')
 
 

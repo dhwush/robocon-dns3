@@ -12,6 +12,40 @@ from motion import PITCH_TOL_DEG, YAW_TOL_DEG, MOVE_ARRIVE_M, ARRIVE_M, MAX_TRIE
 from vote import LOCK_FRAMES, WINDOW_FRAMES, Vote
 
 
+def stabilize_local_rgb(views, tracks, camera=None):
+    """单帧结论立即显示；仅对相邻有效帧的小幅绘框抖动做限幅平滑。"""
+    import cv2
+    import numpy as np
+    for name,view in views.items():
+        view.measurements.pop('display_piece',None)
+        if view.method!='RGB局部盒面' or view.conclusion not in ('1','2') or view.piece is None:
+            tracks.pop(name,None)
+            continue
+        x,y,w,h=cv2.boundingRect(view.piece)
+        center=(x+w/2,y+h/2)
+        previous=tracks.get(name)
+        previous_camera=None if previous is None else previous.get('camera')
+        stationary=(camera is None or (previous_camera is not None
+                    and math.hypot(camera[0]-previous_camera[0],camera[1]-previous_camera[1])<=.01
+                    and abs(math.remainder(camera[2]-previous_camera[2],2*math.pi))<=math.radians(.3)
+                    and abs(camera[3]-previous_camera[3])<=.3
+                    and abs(camera[4]-previous_camera[4])<=.3))
+        same=(previous is not None and previous['state']==view.conclusion
+              and stationary
+              and math.hypot(center[0]-previous['center'][0],center[1]-previous['center'][1])<=max(5,.08*w)
+              and .8<=w/max(1,previous['width'])<=1.25)
+        count=previous['count']+1 if same else 1
+        raw=np.asarray(view.piece,dtype=np.float32)
+        display=raw.copy()
+        if same and previous['display_piece'].shape==raw.shape:
+            # 不改识别轮廓/结论，不保留未知帧；每点最多偏离本帧1.5px。
+            display=raw+.5*np.clip(previous['display_piece']-raw,-3,3)
+        tracks[name]=dict(state=view.conclusion,center=center,width=w,count=count,
+                          display_piece=display,camera=camera)
+        view.measurements['display_piece']=np.rint(display).astype(np.int32)
+        view.measurements['rgb_local_track']=dict(candidate=view.conclusion,frames=count)
+
+
 LEVELS = ("bright", "daylight", "indoor", "dim", "dark")
 LIGHT_WORDS = {
     "bright": "很亮",
@@ -165,6 +199,7 @@ class FieldWatch:
         self.stable_pitch = self.pitch
         self.stable_frames = 0
         self.parallax_origins = {}
+        self.local_rgb_tracks = {}
         self.autonomy = None
 
     def enable_autonomy(self, clock=None):
@@ -244,6 +279,7 @@ class FieldWatch:
             self.stable_pose = pose
             self.stable_pitch = self.pitch
             self.stable_frames = 0
+            self.local_rgb_tracks.clear()
             for vote in self.votes.values():
                 vote.on_move()
         else:
@@ -259,6 +295,8 @@ class FieldWatch:
             depth,
             self.roll,
         )
+        stabilize_local_rgb(self.views,self.local_rgb_tracks,
+                            (pose.x,pose.y,pose.yaw,self.pitch,self.roll))
         # 请求侧向观察时记住原始光心，不让移动途中的新帧不断移动视差基准。
         if color is not None:
             from car_pose import camera_position

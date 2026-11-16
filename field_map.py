@@ -14,6 +14,18 @@ import numpy as np
 ORIGIN_X = -1.815
 ORIGIN_Y = 0.854
 CELL_M = 1.2
+# 用户确认的走廊纵深上限；图上方为+Y。整车避让余量由导航层膨胀。
+LEFT_CORRIDOR_MAX_Y = 1.854
+RIGHT_CORRIDOR_MAX_Y = ORIGIN_Y + 3 * CELL_M
+
+
+def driving_exclusions():
+    """仅用于行驶约束，不作为视觉遮挡物。无外侧可绕过的有限边界。"""
+    inf = float('inf')
+    return ((-inf, ORIGIN_X, LEFT_CORRIDOR_MAX_Y, inf),
+            (-inf, inf, RIGHT_CORRIDOR_MAX_Y, inf))
+
+
 # 1、5、6 直接放在木头地面上，每块 50 cm 见方，不跟 1.2 m 的台齐边。
 GROUND_M = 0.50
 # 2、3、4 号的塔只占 20 cm 台正中的 50 cm 见方。白盒和塔顶都不超出这块。

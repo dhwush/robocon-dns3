@@ -272,5 +272,7 @@ def open_radar(args):
 def radar_pose_text(pose):
     if pose is None:
         return '雷达等待有效位姿：x=-- m y=-- m yaw=--°；暂停识别和计算'
+    sampled_at = time.strftime('%m-%d %H:%M:%S', time.localtime(pose.stamp))
+    sampled_at += f'.{int(pose.stamp * 1000) % 1000:03d}'
     return (f'雷达·右前角 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={math.degrees(pose.yaw):+.1f}° '
-            f'测量时间={pose.stamp:.6f} s 数据年龄={max(0., time.time()-pose.stamp)*1000:.0f} ms')
+            f'采样时刻={sampled_at} 位姿延迟={max(0., time.time()-pose.stamp)*1000:.0f} ms')

@@ -189,3 +189,127 @@ def test_moving_keeps_original_view_and_inflight_goal(monkeypatch):
                        chase_to='fresh',cells=(cell.name,))
     watch._remember_goal(different)
     assert watch.goal[cell.name][:2] == (goal.final_x,goal.final_y)
+
+
+def missing_top_scene(contrast=True, background=True):
+    cell,pose,offset,intr,color,depth = scene(2)
+    body = depth < 6
+    z = body_heights(pose,offset,intr,depth)
+    color[:] = 160
+    if contrast:
+        color[body] = 225  # 盒和柜均通过白色HSV，仍保留原图明暗差。
+    depth[body & (z > cell.two_z-.10)] = np.nan
+    if not background:
+        depth[~body] = np.nan
+    return cell,pose,offset,intr,color,depth
+
+
+def test_rgb_boundary_recovers_missing_depth_top_against_gray_white_background():
+    cell,pose,offset,intr,color,depth = missing_top_scene()
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    info = view.measurements['far_white']
+    assert view.conclusion == '2'
+    assert info['depth_top_height_cm'] < (cell.two_z-.08)*100
+    assert abs(info['rgb_top_height_cm']-cell.two_z*100) < 3
+    assert info['rgb_top_columns'] >= 8
+    assert info['upper_clear']
+
+
+@pytest.mark.parametrize('contrast,background',[(False,True),(True,False)])
+def test_missing_depth_top_requires_both_image_edge_and_background(contrast,background):
+    cell,pose,offset,intr,color,depth = missing_top_scene(contrast,background)
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion is None
+    assert 'rgb_top_height_cm' not in view.measurements['far_white']
+    assert view.needs_parallax
+
+
+def test_image_seam_cannot_hide_an_unobserved_upper_layer():
+    cell,pose,offset,intr,color,depth = scene(2)
+    z = body_heights(pose,offset,intr,depth)
+    body = depth < 6
+    color[:] = 160
+    color[body & (z <= cell.one_z)] = 225
+    # 在一层高度有明显色差，但上层实际存在且深度缺失，不能当作一层顶。
+    depth[body & (z > cell.one_z-.10)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion is None
+    assert view.needs_parallax
+
+
+def test_thin_depth_strip_with_verified_rgb_top_is_usable():
+    cell,pose,offset,intr,color,depth = missing_top_scene()
+    z = body_heights(pose,offset,intr,depth)
+    depth[(depth<6) & (z<cell.two_z-.14)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    info = view.measurements['far_white']
+    assert info['height_span_cm'] < 6
+    assert view.conclusion == '2'
+    assert info['top_edge_clear'] and info['upper_clear']
+
+
+def test_top_boundary_depth_hole_can_use_higher_measured_background():
+    cell,pose,offset,intr,color,depth = missing_top_scene()
+    # 用平面投影的高度定位顶边上方的空洞，不把背景实际世界高度当盒面高度。
+    _,_,_,_,_,full_depth = scene(2)
+    plane_depth = np.full_like(full_depth, np.median(full_depth[full_depth<6]))
+    z = body_heights(pose,offset,intr,plane_depth)
+    depth[(depth>6)&(z>cell.two_z)&(z<cell.two_z+.055)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == '2'
+    assert view.measurements['far_white']['rgb_top_check']['accepted_columns'] >= 8
+
+
+def test_spatial_grouping_separates_touching_pixels_on_different_depth_planes():
+    from classify import _far_spatial_labels
+    # 图像相邻甚至可被闭运算连起，但三维前后相差20厘米。
+    rows, cols = np.indices((10,20))
+    world = np.column_stack((cols.ravel()*.01, np.where(cols.ravel()<10,4.,4.2),
+                             rows.ravel()*.01))
+    labels, parts = _far_spatial_labels(world,np.ones(200,bool),rows.ravel(),cols.ravel(),rows.shape)
+    assert len(parts) == 2
+    assert labels[5,9] != labels[5,10]
+
+
+def test_rejected_white_candidate_keeps_support_and_top_failure_diagnostics():
+    cell,pose,offset,intr,color,depth = missing_top_scene(False,True)
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    info = view.measurements['far_white']
+    assert view.conclusion is None
+    assert info['support_pixels']
+    assert info['spatial_groups'] >= 1
+    assert info['rgb_top_check']['reason']
+    assert info['rgb_top_check']['accepted_columns'] == 0
+
+
+def test_larger_invalid_surface_does_not_discard_smaller_verified_white_box():
+    cell,pose,offset,intr,color,depth = scene(1)
+    z = body_heights(pose,offset,intr,depth)
+    depth[(depth<6)&(z<cell.one_z-.10)] = np.nan
+    origin,right,down,ahead = camera_frame(pose,offset,0.)
+    rows,cols = np.indices(depth.shape)
+    rays = ((cols-intr.cx)/intr.fx)[...,None]*right + ((rows-intr.cy)/intr.fy)[...,None]*down + ahead
+    measured = (cell.y+.12-origin[1])/rays[:,:,1]
+    world = origin+measured[:,:,None]*rays
+    clutter = ((world[:,:,0]>cell.x+.22)&(world[:,:,0]<cell.x+.29)
+               &(world[:,:,2]>.09)&(world[:,:,2]<.95))
+    depth[clutter] = measured[clutter]
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    info = view.measurements['far_white']
+    assert view.conclusion == '1'
+    assert info['spatial_groups'] >= 2
+    assert info['groups'][0]['result'] is None
+    assert info['groups'][0]['support_points'] > info['support_points']
+
+
+@pytest.mark.parametrize('layers',[1,2])
+@pytest.mark.parametrize('seed',[1,9,21])
+def test_white_layer_result_survives_depth_noise_and_sparse_missing_points(layers,seed):
+    cell,pose,offset,intr,color,depth = scene(layers)
+    rng = np.random.default_rng(seed)
+    body = depth < 6
+    depth[body] += rng.normal(0,.008,int(body.sum()))
+    depth[body & (rng.random(depth.shape)<.12)] = np.nan
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == str(layers)
+    assert view.measurements['far_white']['upper_clear']

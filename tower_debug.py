@@ -115,6 +115,18 @@ def paint_diagnostics(color, depth, views, selected=0, locked=None):
             descriptions[2].append(
                 f"估距{rgb_cap['distance_m']:.2f}m 俯仰{rgb_cap['pitch_deg']:+.1f}° "
                 f"横滚{rgb_cap['roll_deg']:+.1f}° 闭合半径{rgb_cap['close_radius_px']}px")
+        state = rgb_cap.get('state')
+        if state is not None:
+            descriptions[2].append('顶块状态：' + {
+                'confirmed': '已确认', 'suspected': '疑似，禁止降级为白盒层数',
+                'absent': '无可信候选'}.get(state, state))
+        ownership=sorted(measure.get('cap_ownership',[]),
+                         key=lambda item:item['bbox'][2]*item['bbox'][3]*item['coverage'],reverse=True)
+        for item in ownership[:2]:
+            owner=item.get('owner')
+            owner_text='未定' if owner is None else str(TOWER_NO.get(owner,owner))+'号'
+            source='实测深度' if item.get('source')=='depth' else 'RGB投影'
+            descriptions[2].append(f"顶块归属 C{item['component']} → {owner_text}（{source}）")
         checks = sorted(rgb_cap.get('checks', []),
                         key=lambda c: c['inside_pixels'], reverse=True)
         descriptions[1].append('编号=RGB连通块；绿=通过，橙=拒绝；下方列格内像素最多的两块')
@@ -156,6 +168,24 @@ def paint_diagnostics(color, depth, views, selected=0, locked=None):
         if 'width_cm' in far_white:
             descriptions[3].append(
                 f"支撑{far_white['support_points']}点，宽{far_white['width_cm']:.1f}cm，顶高{far_white['top_height_cm']:.1f}cm")
+        if 'height_span_cm' in far_white:
+            descriptions[3].append(
+                f"三维分组{far_white.get('spatial_groups', 0)}个，实测高度跨度{far_white['height_span_cm']:.1f}cm")
+        top_check = far_white.get('rgb_top_check', {})
+        if top_check:
+            descriptions[3].append('补顶校验：' + top_check.get('reason', '') +
+                f"；有效{top_check.get('accepted_columns', 0)}/{top_check.get('support_columns', 0)}列")
+        if 'rgb_top_height_cm' in far_white:
+            descriptions[3].append(
+                f"原图顶边补顶：深度顶高{far_white['depth_top_height_cm']:.1f}→"
+                f"{far_white['rgb_top_height_cm']:.1f}cm，{far_white['rgb_top_columns']}列通过背景校验")
+    if 'faces' in far_white:
+        descriptions[3].append(f"竖直面{far_white['faces']}个，通过{far_white.get('accepted_faces',0)}个")
+    near_top = measure.get('near_top_check')
+    if near_top:
+        descriptions[3].append(f"近处顶边：{near_top['valid_columns']}/{near_top['columns']}列有效")
+    if measure.get('upper_object'):
+        descriptions[3].append('深度证实上层仍有物体，禁止按纯白盒层数输出')
     recovery = measure.get('depth_boundary_recovery')
     if recovery:
         descriptions[3].append(

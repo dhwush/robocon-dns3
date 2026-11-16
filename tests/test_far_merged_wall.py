@@ -70,7 +70,7 @@ def test_recorded_far_tower_with_red_upper_band(filename):
     assert view.method == 'RGB顶块'
 
 
-@pytest.mark.parametrize('kind', ['single', 'side_by_side', 'wrong_height', 'wrong_cell'])
+@pytest.mark.parametrize('kind', ['single', 'side_by_side', 'wrong_cell'])
 def test_rgb_cap_rejects_unrelated_colors(kind):
     from classify import _rgb_cap_reading, _mask
     from car_pose import to_camera
@@ -136,3 +136,45 @@ def test_rgb_diagnostic_reports_rejection_without_changing_result(single):
 def mask_to_outline(mask):
     import cv2
     return cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0][0]
+
+
+@pytest.mark.parametrize('bgr',[(0,0,220),(220,0,0)])
+def test_single_color_at_tower_top_does_not_block_two_layers(bgr):
+    cell,pose,offset,intr,color,depth = merged_scene(bgr,(220,220,220))
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.measurements['white_reading']['result'] == '2'
+    assert view.measurements['rgb_cap']['state'] == 'absent'
+    assert view.conclusion == '2'
+    assert not view.skip_vote
+    assert not view.measurements.get('cap_blocks_white')
+
+
+@pytest.mark.parametrize('kind',['none','low_color','tiny_noise','wrong_cell'])
+def test_unrelated_color_does_not_block_plain_two_layers(kind):
+    cell,pose,offset,intr,color,depth = merged_scene((220,220,220),(220,220,220))
+    fill = M['_fill_plane']
+    if kind == 'low_color':
+        fill(color,depth,pose,offset,0.,cell.y-.16,cell.base_z+.10,
+             cell.base_z+.20,(0,0,220),cell.x,.10)
+    elif kind == 'tiny_noise':
+        from car_pose import project
+        u,v = np.round(project(cell.center(cell.cap_z-.05),pose,offset,0.,intr)).astype(int)
+        color[v:v+2,u:u+2] = (0,0,220)
+    elif kind == 'wrong_cell':
+        fill(color,depth,pose,offset,0.,cell.y-.16,cell.two_z,cell.cap_z,
+             (0,0,220),cell.x+1.,.10)
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.conclusion == '2'
+    assert view.measurements['rgb_cap']['state'] == 'absent'
+    assert not view.measurements.get('cap_blocks_white')
+
+
+@pytest.mark.parametrize('upper,lower,expected',[
+    ((0,0,220),(220,0,0),'红'),((220,0,0),(0,0,220),'蓝')])
+def test_confirmed_cap_overrides_simultaneous_white_two_layer_result(upper,lower,expected):
+    cell,pose,offset,intr,color,depth = merged_scene(upper,lower)
+    view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
+    assert view.measurements['white_reading']['result'] == '2'
+    assert view.measurements['rgb_cap']['state'] == 'confirmed'
+    assert view.conclusion == expected
+    assert view.method == 'RGB顶块'

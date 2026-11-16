@@ -1,4 +1,4 @@
-"""按场地塔位记忆结果，自动长时确认并调度局部复核。"""
+"""信任有效识别结果，仅为尚未看清的塔调度观察姿态与安全换位。"""
 from __future__ import annotations
 
 from collections import Counter
@@ -6,11 +6,12 @@ from dataclasses import asdict, dataclass, field, replace
 import math
 import time
 
-from car_pose import (CarPose, camera_position, observation_moved,
+from car_pose import (CarPose, camera_position, observation_moved, turned_pose, body_center,
                       OBS_STABLE_FRAMES, OBS_ANGLE_JITTER_DEG)
 from field_map import DISPLAY, TOWER_NO, tower_cells
 from motion import (Action, MAX_TRIES, GOAL_BEARING, PITCH_OFFSET, heading_words, format_pitch, _aim_cell, _looks,
-                    fits_when_aimed, fits_rgb_when_aimed, nearest_observation, DEPTH_FAR_M, _slant, primary_route, _travel, _move_toward)
+                    fits_when_aimed, fits_rgb_when_aimed, nearest_observation, _sees,
+                    YAW_TOL_DEG, PITCH_TOL_DEG, MOVE_ARRIVE_M, _travel, _bypass_points, _move_toward, survey as supplementary_route, _observation_preferences)
 
 WINDOW_SECONDS = 2.0
 CONFIRM_WINDOWS = 3
@@ -19,6 +20,7 @@ MIN_AGREEMENT = 0.7
 MAX_FRAME_GAP = 1.5
 LOOK_SECONDS = 30.0
 NO_PROGRESS_SECONDS = 10.0
+POINT_LOOK_SECONDS = 2.0
 STATION_RESET_M = 0.10
 PITCH_RECHECK_DEG = 4.0
 STOP_HOLD_SECONDS = 1.0
@@ -66,8 +68,10 @@ class Evidence:
 
 
 class AutonomousSurvey:
-    def __init__(self, watch, clock=time.monotonic):
+    def __init__(self, watch, clock=time.monotonic, *, stationary_scan=False):
         self.watch = watch
+        self.stationary_scan = stationary_scan
+        self.initial_pose = watch.last_pose
         self.clock = clock
         self.started = clock()
         self.evidence = {name: Evidence() for name in DISPLAY}
@@ -85,6 +89,7 @@ class AutonomousSurvey:
         self.anchor_roll = None
         self.station_pose = None
         self.heading_centers = {}
+        self.scan_targets = {}
         self.sampling_suspended_at = None
         self.last_update = None
         self.message = "等待相机稳定"
@@ -96,6 +101,8 @@ class AutonomousSurvey:
         self.reserve_index = 0
         self.manual_confirmed = set()
         self.observations = []
+        self.observation_goal = None
+        self.failed_observations = []
         self.distance_m = 0.0
         self.distance_pose = watch.last_pose
         self.stop_until = None
@@ -131,14 +138,14 @@ class AutonomousSurvey:
         return True
 
     def metrics(self):
-        return dict(distance_m=round(self.distance_m, 3),
+        return dict(observation_unit="settled_pose", distance_m=round(self.distance_m, 3),
                     observation_count=len(self.observations),
                     observations=self.observations,
                     manual_confirmed=[n for n in DISPLAY if n in self.manual_confirmed])
 
     @property
     def complete(self):
-        return all(v.locked is not None and not v.recheck for v in self.watch.votes.values())
+        return all(v.locked is not None for v in self.watch.votes.values())
 
     def pause(self):
         self.sampling_suspended_at = None
@@ -149,10 +156,12 @@ class AutonomousSurvey:
         self.look_key = None
         self.anchor = None
         self.action = None
+        self.observation_goal = None
         self.station_pose = None
         self.stop_until = None
         self.stop_message = ""
         self.heading_centers.clear()
+        self.scan_targets.clear()
         self.attempts = {name: 0 for name in DISPLAY}
 
     def suspend_sampling(self):
@@ -175,6 +184,7 @@ class AutonomousSurvey:
             evidence.clear()
 
     def _freeze_headings(self, pose):
+        self.scan_targets.clear()
         self.heading_centers = {name: math.degrees(pose.yaw) - view.bearing_deg
                                 for name, view in self.watch.views.items()}
 
@@ -184,22 +194,109 @@ class AutonomousSurvey:
                                           - self.watch.views[name].bearing_deg)
         return self.heading_centers[name]
 
+    def _targets(self, name):
+        if name in self.scan_targets:
+            return self.scan_targets[name]
+        watch = self.watch
+        pose, view = watch.last_pose, watch.views[name]
+        center = self.heading_center(name)
+        yaw_now = math.degrees(pose.yaw)
+        wrap = lambda value: (value + 180.) % 360. - 180.
+        # 当前视野足够就先保持；其余候选仍保留作未知时的替代视角。
+        options = list(zip(GOAL_BEARING, (view.pitch_target_deg+d for d in PITCH_OFFSET)))
+        if view.in_view and not view.needs_yaw and not view.needs_pitch:
+            options.append((wrap(yaw_now-center), watch.pitch))
+        options = list(dict.fromkeys(options))
+        pending_cells = [c for c in tower_cells() if watch.votes[c.name].locked is None]
+        coverage_at = {target: sum(_sees(c, turned_pose(pose, math.radians(center+target[0])),
+                                        watch.setup.center_to_corner, target[1], watch.intr)
+                                   for c in pending_cells) for target in options}
+        ordered = []
+        yaw, pitch = yaw_now, watch.pitch
+        while options:
+            def cost(target):
+                goal, target_pitch = target
+                turn = abs(wrap(center+goal-yaw))
+                tilt = abs(target_pitch-pitch)
+                return -coverage_at[target], turn+tilt
+            target = min(options, key=cost)
+            options.remove(target)
+            ordered.append(target)
+            yaw, pitch = center+target[0], target[1]
+        self.scan_targets[name] = tuple(ordered)
+        return self.scan_targets[name]
+
     def _aim(self, name):
         watch = self.watch
         center = self.heading_center(name)
         bearing = math.degrees(watch.last_pose.yaw) - center
         view = replace(watch.views[name], bearing_deg=bearing)
+        targets = self._targets(name)
         action = _aim_cell(name, view, watch.last_pose, watch.setup.center_to_corner,
-                           watch.pitch, True, watch.intr, self.attempts[name])
+                           watch.pitch, True, watch.intr, self.attempts[name], targets)
         if action is not None and action.kind in ('yaw', 'pitch', 'wait'):
-            target = math.radians(center + GOAL_BEARING[action.attempt])
-            action = replace(action, yaw=math.atan2(math.sin(target), math.cos(target)))
+            goal, pitch = targets[action.attempt]
+            target = math.radians(center + goal)
+            action = replace(action, yaw=math.atan2(math.sin(target), math.cos(target)), pitch=pitch)
+        if action is not None and action.kind in ('yaw', 'pitch', 'wait'):
+            faced = turned_pose(watch.last_pose, action.yaw)
+            if any(name in old['cells'] and math.hypot(faced.x-old['x'], faced.y-old['y']) < .08
+                   and abs((math.degrees(faced.yaw)-old['yaw_deg']+180)%360-180) <= YAW_TOL_DEG
+                   and abs(action.pitch-old['pitch_deg']) <= PITCH_TOL_DEG for old in self.failed_observations):
+                self.attempts[name] = action.attempt+1
+                return self._aim(name) if self.attempts[name] < MAX_TRIES else None
         return action
 
-    def required_checks(self, name):
-        cell = next(c for c in tower_cells() if c.name == name)
-        distance = _slant(cell,camera_position(self.watch.last_pose,self.watch.setup.center_to_corner,0.))
-        return 3 if distance > DEPTH_FAR_M else 2
+    def _note_observation(self, names, now, attempt=0):
+        """同一停稳位置、yaw与俯仰只计一次，多塔共享该次观测。"""
+        watch = self.watch
+        if not watch.have_color or watch.stable_frames < OBS_STABLE_FRAMES:
+            return
+        pose = watch.last_pose
+        previous = self.observations[-1] if self.observations else None
+        same = previous is not None and math.hypot(pose.x-previous['x'], pose.y-previous['y']) < .03
+        same = same and abs((math.degrees(pose.yaw)-previous['yaw_deg']+180)%360-180) <= YAW_TOL_DEG
+        same = same and abs(watch.pitch-previous['pitch_deg']) <= PITCH_TOL_DEG
+        if same:
+            previous['cells'] = list(dict.fromkeys(previous.get('cells', [previous['cell']])+list(names)))
+            if previous['cell'] is None and names:
+                previous['cell'] = names[0]
+        else:
+            self.observations.append(dict(cell=names[0] if names else None, cells=list(names), attempt=attempt,
+                x=pose.x, y=pose.y, yaw_deg=math.degrees(pose.yaw),
+                pitch_deg=watch.pitch, elapsed_s=now-self.started))
+
+    def _advance_observation(self):
+        """移动、绕障、转向和俯仰都是到同一次观测姿态的准备步骤。"""
+        goal = self.observation_goal
+        if goal is None:
+            return False
+        watch = self.watch
+        names = tuple(n for n in goal.cells if watch.votes[n].locked is None)
+        if not names:
+            self.observation_goal = None
+            return False
+        pose = watch.last_pose
+        target = CarPose(goal.observation_x, goal.observation_y, goal.observation_yaw)
+        move_target = turned_pose(target, pose.yaw)
+        if math.dist(body_center(pose), body_center(target)) > MOVE_ARRIVE_M:
+            trip = _travel(pose.x, pose.y, move_target.x, move_target.y, _bypass_points(pose.yaw), pose.yaw)
+            if trip is None:
+                self.observation_goal = None
+                self.action = Action('blocked', '联合观测姿态暂无安全路线')
+                return True
+            self.action = _move_toward(pose, move_target.x, move_target.y, trip[1], 'joint', names)
+        elif abs((math.degrees(target.yaw-pose.yaw)+180)%360-180) > YAW_TOL_DEG:
+            self.action = Action('yaw', '转到联合观测朝向', yaw=target.yaw,
+                                 pitch=goal.observation_pitch, cell=names[0], cells=names)
+        elif abs(goal.observation_pitch-watch.pitch) > PITCH_TOL_DEG:
+            self.action = Action('pitch', '调到联合观测俯仰', yaw=target.yaw,
+                                 pitch=goal.observation_pitch, cell=names[0], cells=names)
+        else:
+            self.action = Action('wait', '联合观测', yaw=target.yaw, pitch=goal.observation_pitch,
+                                 cell=names[0], cells=names)
+        self.message = '到达联合观测姿态后，一次查看全部可见的未识别塔'
+        return True
 
     def _record(self, name, event, result, now, previous=None):
         watch = self.watch
@@ -207,13 +304,6 @@ class AutonomousSurvey:
         self.history[name].append(dict(event=event, result=result, previous=previous,
             elapsed_s=now-self.started, x=pose.x, y=pose.y,
             yaw_deg=math.degrees(pose.yaw), pitch_deg=watch.pitch))
-
-    def _changed_view(self, old):
-        watch = self.watch
-        pose = watch.last_pose
-        turn = math.degrees(math.atan2(math.sin(pose.yaw-old[2]), math.cos(pose.yaw-old[2])))
-        return (math.hypot(pose.x-old[0], pose.y-old[1]) >= 0.02
-                or abs(turn) >= 5 or abs(watch.pitch-old[3]) >= 3)
 
     def _stop_at_arrival(self, now):
         """先发停止并留出反应时间，停稳后才能采样或下发下一动作。"""
@@ -245,6 +335,8 @@ class AutonomousSurvey:
         watch = self.watch
         now = self.clock()
         pose = watch.last_pose
+        if self.initial_pose is None:
+            self.initial_pose = pose
         if self.distance_pose is not None:
             self.distance_m += math.hypot(pose.x-self.distance_pose.x, pose.y-self.distance_pose.y)
         self.distance_pose = pose
@@ -293,67 +385,43 @@ class AutonomousSurvey:
             if self._expire_look(now):
                 self._schedule(now)
             return
+        if self.observation_goal is not None:
+            self._advance_observation()
+            if self.action is not None and self.action.kind != 'wait':
+                return
+        if not self.stationary_scan and not self.observations and not self.complete:
+            visible = [n for n,v in watch.views.items() if v.in_view and not v.needs_yaw and not v.needs_pitch]
+            self._note_observation(visible, now)
+        preferences = (_observation_preferences(pose,watch.setup.center_to_corner,watch.pitch,watch.intr)
+                       if not self.stationary_scan else None)
         for name, view in watch.views.items():
             evidence = self.evidence[name]
-            if name in self.manual_confirmed:
-                evidence.clear()
-                continue
             vote = watch.votes[name]
-            if not view.in_view or view.needs_yaw or view.needs_pitch:
+            # 已有结果直接视为准确；后续帧不触发冲突或重复观察。
+            if vote.locked is not None:
+                vote.recheck = False
                 evidence.clear()
                 continue
-            if name in self.conflicts and not self._changed_view(self.conflicts[name]):
+            if (not view.in_view or view.needs_yaw or view.needs_pitch
+                    or view.skip_vote or view.conclusion is None):
                 evidence.clear()
                 continue
-            value = None if view.skip_vote else view.conclusion
-            # 远处只采信独立顶块或已经核验深度、顶高和上方空域的白盒。
-            cell = next(c for c in tower_cells() if c.name == name)
-            far = _slant(cell, camera_position(pose, watch.setup.center_to_corner, 0.)) > DEPTH_FAR_M
-            verified_white = (value in ('1', '2') and view.method == '远处白盒'
-                              and (view.measurements or {}).get('far_white', {}).get('upper_clear') is True)
-            if far and not (value in ('红', '蓝') and view.method == 'RGB顶块' or verified_white):
-                value = None
-            result = evidence.see(value, now)
-            if result is None:
-                continue
-            if (vote.locked is None or vote.recheck or result != vote.locked):
-                # 新证据改变任务集后，立即作废“无可用点”的旧规划缓存。
-                if self.action is not None and self.action.kind == "blocked":
-                    self.action = None
-                    self.blocked_until = 0.0
-            if vote.locked is not None and not vote.recheck and result == vote.locked:
-                continue
-            if vote.locked is not None and not vote.recheck:
-                vote.recheck = True
-                self.pitch_checks[name] = []
-                self.conflicts[name] = (pose.x, pose.y, pose.yaw, watch.pitch)
-                self.conflict_results[name] = dict(previous=vote.locked, detected=result, candidate=result)
-                self._record(name, "conflict", result, now, vote.locked)
-                # 冲突任务优先复核，停止原任务动作和观察计时。
-                self.action = None
-                self.look_key = self.look_started = None
-            if vote.recheck and name in self.conflict_results:
-                self.conflict_results[name]['candidate'] = result
-            checks = self.pitch_checks[name]
-            # 新姿态的稳定结果不同，作废之前的交叉证据，不能跨冲突凑满两档。
-            if checks and checks[0]['result'] != result:
-                checks.clear()
-            distinct = not any(abs(watch.pitch-item['pitch']) < PITCH_RECHECK_DEG for item in checks)
-            if distinct:
-                checks.append(dict(result=result, pitch=watch.pitch))
-                self._record(name, "pitch_checked", result, now)
-            if len(checks) < self.required_checks(name):
-                if distinct:
-                    self.attempts[name] = min(MAX_TRIES, self.attempts[name] + 1)
-                    if self.action is not None and self.action.cell == name:
-                        self.action = None
-                        self.look_key = self.look_started = None
-                continue
-            previous = vote.locked
+            if preferences is not None and not preferences[name][0]:
+                goal = self.observation_goal
+                if goal is None or not goal.observation_fallback or name not in goal.cells:
+                    continue
+            result = view.conclusion
             vote.locked, vote.recheck, vote.ready = result, False, False
             self.conflicts.pop(name, None)
             self.conflict_results.pop(name, None)
-            self._record(name, "confirmed" if previous is None else "resolved", result, now, previous)
+            evidence.clear()
+            self._record(name, "confirmed", result, now)
+            self._note_observation([name], now, self.attempts[name])
+            if self.action is not None and (self.action.cell == name
+                    or self.action.kind == "blocked"):
+                self.action = None
+                self.look_key = self.look_started = None
+                self.blocked_until = 0.0
             self.attempts[name] = 0
         self._schedule(now)
 
@@ -363,9 +431,24 @@ class AutonomousSurvey:
         name, attempt = self.look_key
         elapsed = now - self.look_started
         progress = self.evidence[name].windows
-        if elapsed < LOOK_SECONDS and (elapsed < NO_PROGRESS_SECONDS or progress > 0):
+        if not self.stationary_scan:
+            if elapsed < POINT_LOOK_SECONDS:
+                return False
+        elif elapsed < LOOK_SECONDS and (elapsed < NO_PROGRESS_SECONDS or progress > 0):
             return False
-        self.attempts[name] = max(self.attempts[name], attempt + 1)
+        if self.observation_goal is not None:
+            goal = self.observation_goal
+            self.failed_observations.append(dict(cells=list(goal.cells), x=goal.observation_x,
+                y=goal.observation_y, yaw_deg=math.degrees(goal.observation_yaw),
+                pitch_deg=goal.observation_pitch))
+            self.observation_goal = None
+        view = self.watch.views[name]
+        # 已停稳观察仍缺前后分离证据，原地换21档不能产生视差；转入换位流程。
+        if view.conclusion is None and (view.needs_parallax
+                or (view.measurements or {}).get('needs_standoff')):
+            self.attempts[name] = MAX_TRIES
+        else:
+            self.attempts[name] = max(self.attempts[name], attempt + 1)
         self._record(name, "observation_timeout", self.watch.views[name].conclusion, now)
         self.evidence[name].clear()
         self.look_key = self.look_started = None
@@ -375,9 +458,11 @@ class AutonomousSurvey:
     def _schedule(self, now):
         watch = self.watch
         pose, offset, intr = watch.last_pose, watch.setup.center_to_corner, watch.intr
+        if self.initial_pose is None:
+            self.initial_pose = pose
         self._expire_look(now)
         if self.action is not None and self.action.cells and all(
-            watch.votes[n].locked is not None and not watch.votes[n].recheck for n in self.action.cells
+            watch.votes[n].locked is not None for n in self.action.cells
         ):
             self.action = None
         if self.action is not None and self.action.kind == "blocked" and now < self.blocked_until:
@@ -387,50 +472,100 @@ class AutonomousSurvey:
                 self.message = "执行观察指令，到位稳定后自动检测"
                 return
             self.action = None
-        if self.primary_stops is None:
-            self.primary_stops, self.primary_line = primary_route(pose,offset,intr)
-            self.reserve_stops = list(getattr(self.primary_stops, "reserve", ()))
-        while self.primary_index < len(self.primary_stops):
-            stop = self.primary_stops[self.primary_index]
-            if math.hypot(stop.x-pose.x,stop.y-pose.y) > .08:
-                break
-            self.primary_index += 1
-        pending = [n for n in DISPLAY if watch.votes[n].locked is None or watch.votes[n].recheck]
+        # 不生成必经复看主线，任务集只包含尚无识别结果的塔。
+        self.primary_stops, self.primary_line = [], []
+        self.reserve_stops = []
+        pending = [n for n in DISPLAY if watch.votes[n].locked is None]
         if not pending:
+            self.observation_goal = None
+            self.look_key = self.look_started = None
             self.action = Action("stop", "停止！全部区域已自动确认")
             self.message = "停止！全部区域已自动确认，保持车身和相机不动"
             return
+        if self._advance_observation():
+            if self.action is not None and self.action.kind == 'wait':
+                key = (self.action.cell, self.action.attempt)
+                if self.look_key != key:
+                    self.look_key, self.look_started = key, now
+                self._note_observation(self.action.cells, now)
+            return
+        if not self.stationary_scan:
+            # 默认只提供新的补充点，一点一组yaw/俯仰，不再逐档原地扫描。
+            origin = camera_position(pose, offset, 0.)
+            references = {n: (watch.views[n].measurements or {}).get('parallax_origin', origin[:2])
+                          for n in pending if watch.views[n].needs_parallax}
+            excluded = [body_center(self.initial_pose)]
+            excluded += [body_center(CarPose(o['x'],o['y'],math.radians(o['yaw_deg'])))
+                         for o in self.observations]
+            plan, _ = supplementary_route(pose, offset, intr, watch.pitch, pending=pending,
+                         references=references, failed=self.failed_observations,
+                         excluded_centers=excluded, planner=nearest_observation)
+            goal = Action('blocked','暂无安全补充点')
+            if len(plan) > 1:
+                stop = plan[1]
+                look = stop.looks[0]
+                numbers = {item.number for item in stop.looks}
+                names = tuple(n for n in pending if TOWER_NO[n] in numbers)
+                goal = Action('wait','补充观测',cells=names,observation_x=stop.x,observation_y=stop.y,
+                              observation_yaw=math.radians(look.yaw_deg),observation_pitch=look.pitch_deg,
+                              observation_fallback=stop.fallback)
+            self.look_key = self.look_started = None
+            if goal.observation_yaw is not None:
+                self.observation_goal = goal
+                self._advance_observation()
+            else:
+                self.action = goal
+                self.blocked_until = now+5.
+                self.message = '暂无能看到剩余塔的安全补充点，保留未观测目标'
+            return
         cells = {cell.name: cell for cell in tower_cells()}
-        # 保持正在积累的观察段；其余任务比较下一可执行姿态的实际转角。
-        def turn_cost(name):
-            if self.attempts[name] >= MAX_TRIES:
-                return math.inf
+        eligible = {n: (fits_when_aimed(cells[n], pose, offset, intr)
+                        or fits_rgb_when_aimed(cells[n], pose, offset, intr)
+                        or watch.views[n].conclusion is not None and watch.views[n].in_view)
+                    for n in pending}
+        pending_names = tuple(pending)
+        # 一次完整观测以共同覆盖为先；位置、yaw和俯仰不按轴分别计费。
+        def adjustment_cost(name):
+            if self.attempts[name] >= MAX_TRIES or not eligible[name]:
+                return (math.inf, math.inf, 0)
             candidate = self._aim(name)
             if candidate is None:
-                return math.inf
-            if candidate.yaw is None:
-                return 0.0
-            return abs(math.degrees(math.atan2(math.sin(candidate.yaw-pose.yaw),
-                                               math.cos(candidate.yaw-pose.yaw))))
+                return (math.inf, math.inf, 0)
+            yaw = candidate.yaw if candidate.yaw is not None else pose.yaw
+            pitch = candidate.pitch if candidate.pitch is not None else watch.pitch
+            turn = abs(math.degrees(math.atan2(math.sin(yaw-pose.yaw), math.cos(yaw-pose.yaw))))
+            tilt = abs(pitch-watch.pitch)
+            faced = turned_pose(pose, yaw)
+            coverage = sum(_sees(cells[n], faced, offset, pitch, intr) for n in pending_names)
+            return -coverage, turn+tilt, 0
         active = self.look_key[0] if self.look_key is not None else (
             self.action.cell if self.action is not None and self.action.kind == 'wait' else None)
-        pending.sort(key=lambda n: (not watch.votes[n].recheck, n != active, turn_cost(n)))
+        pending.sort(key=lambda n: (n != active, adjustment_cost(n)))
+        references = {n: (watch.views[n].measurements or {}).get('parallax_origin',
+                           camera_position(pose, offset, 0.)[:2])
+                      for n in pending if watch.views[n].needs_parallax}
+        joint = nearest_observation(pose, offset, intr, pending, self.exhausted,
+                                    references, watch.pitch, self.failed_observations)
+        if joint.observation_yaw is not None:
+            # 搜索已同时包含当前位置和移动候选，直接执行最佳完整姿态。
+            self.observation_goal = joint
+            self.look_key = self.look_started = None
+            self._advance_observation()
+            if self.action.kind == 'wait':
+                self.look_key, self.look_started = (self.action.cell, 0), now
+                self._note_observation(self.action.cells, now)
+            return
         for name in pending:
             view = watch.views[name]
             if self.attempts[name] >= MAX_TRIES:
                 continue
-            if not (fits_when_aimed(cells[name], pose, offset, intr)
-                    or fits_rgb_when_aimed(cells[name], pose, offset, intr)
-                    or view.conclusion is not None and view.in_view):
+            if not eligible[name]:
                 continue
             action = self._aim(name)
             if action is None:
                 self.attempts[name] = MAX_TRIES
                 continue
             self.attempts[name] = action.attempt
-            if action.kind == "wait" and name in self.conflicts and not self._changed_view(self.conflicts[name]):
-                self.attempts[name] += 1
-                return self._schedule(now)
             if self.look_key is not None and self.look_key != (name, action.attempt):
                 self.look_key = self.look_started = None
             self.action = action
@@ -438,11 +573,8 @@ class AutonomousSurvey:
                 key = (name, self.attempts[name])
                 if key != self.look_key:
                     self.look_key, self.look_started = key, now
-                    self.observations.append(dict(cell=name, attempt=action.attempt,
-                        x=pose.x, y=pose.y, yaw_deg=math.degrees(pose.yaw),
-                        pitch_deg=watch.pitch, elapsed_s=now-self.started))
-                progress = self.evidence[name].windows
-                self.message = f"{TOWER_NO[name]}号：俯仰复核{len(self.pitch_checks[name])}/{self.required_checks(name)}档；本档稳定{progress}/{CONFIRM_WINDOWS}段（每段至少{WINDOW_SECONDS:g}秒）"
+                    self._note_observation([name], now, action.attempt)
+                self.message = f"{TOWER_NO[name]}号：等待当前视角的有效识别结果"
                 if view.conclusion is None:
                     reason = view.reason or "尚无通过校验的识别结果"
                     rgb = (view.measurements or {}).get("rgb_cap")
@@ -450,56 +582,25 @@ class AutonomousSurvey:
                         reason += f"；独立RGB顶块合格候选{rgb['candidates']}个（需唯一候选）"
                     self.message += f"；{reason}；本档已等{now-self.look_started:.0f}秒，无进展{NO_PROGRESS_SECONDS:g}秒换档"
                 return
-            self.message = f"原地调整{TOWER_NO[name]}号观察角度（{action.attempt+1}/{MAX_TRIES}）"
+            self.message = f"调整{TOWER_NO[name]}号未看清目标的观察角度（{action.attempt+1}/{MAX_TRIES}）"
             return
-        # 当前点看够后先走近处主线，沿途点重新扫描远塔；只有主线用尽才去兜底。
-        while self.primary_index < len(self.primary_stops):
-            stop = self.primary_stops[self.primary_index]
-            useful = tuple(n for n in pending if fits_rgb_when_aimed(cells[n],
-                CarPose(stop.x,stop.y,pose.yaw),offset,intr))
-            if not useful:
-                self.primary_index += 1
-                continue
-            trip = _travel(pose.x,pose.y,stop.x,stop.y,[],pose.yaw)
-            if trip is None:
-                self.primary_index += 1
-                continue
-            self.action = _move_toward(pose,stop.x,stop.y,trip[1],'primary',tuple(pending))
-            if self.action is not None:
-                self.message = f"主路线→{stop.kind}；停稳后复看远处顶块"
-                self.look_key = self.look_started = None
-                return
-            self.primary_index += 1
-        # 主线用尽仍有未确认目标时，先尝试保留的沿途备用点，再规划远处兜底。
-        while self.reserve_index < len(self.reserve_stops):
-            stop = self.reserve_stops[self.reserve_index]
-            if math.hypot(stop.x-pose.x, stop.y-pose.y) <= .08:
-                self.reserve_index += 1
-                continue
-            useful = tuple(n for n in pending if (
-                fits_when_aimed(cells[n], CarPose(stop.x,stop.y,pose.yaw),offset,intr)
-                or fits_rgb_when_aimed(cells[n], CarPose(stop.x,stop.y,pose.yaw),offset,intr)))
-            trip = _travel(pose.x,pose.y,stop.x,stop.y,[],pose.yaw) if useful else None
-            if trip is not None:
-                self.action = _move_toward(pose,stop.x,stop.y,trip[1],'reserve',useful)
-                if self.action is not None:
-                    self.message = "主线仍有未确认目标→沿途备用点；只复测剩余目标"
-                    self.look_key = self.look_started = None
-                    return
-            self.reserve_index += 1
-        # 备用点也用尽，才规划近距兜底。
+        # 只有尚未看清的塔参与换位，不访问固定复看点或备用点。
         references = {}
         origin = camera_position(pose, offset, 0.)
         for name in pending:
             if self.attempts[name] >= MAX_TRIES:
                 if not any(math.hypot(pose.x-x, pose.y-y)<0.08 for x,y in self.exhausted[name]):
                     self.exhausted[name].append((pose.x, pose.y))
-            if watch.views[name].needs_parallax or self.attempts[name] >= MAX_TRIES:
+            if watch.views[name].needs_parallax:
                 references[name] = (watch.views[name].measurements or {}).get("parallax_origin", origin[:2])
-        self.action = nearest_observation(pose, offset, intr, pending, self.exhausted, references)
+        self.action = joint
+        if joint.observation_yaw is not None:
+            self.observation_goal = joint
+            self.look_key = self.look_started = None
+            self._advance_observation()
         self.blocked_until = now + 5.0
         self.look_key = self.look_started = None
-        self.message = "优先短距离换位复核" if self.action.kind == "move" else "缺少安全有效观察点，任务保留，等待条件变化"
+        self.message = "换到安全观察点，只查看尚未看清的塔" if self.action.kind == "move" else "缺少安全有效观察点，任务保留，等待条件变化"
 
     def lines(self):
         watch = self.watch
@@ -507,34 +608,8 @@ class AutonomousSurvey:
         for name in sorted(DISPLAY, key=lambda n: TOWER_NO[n]):
             vote = watch.votes[name]
             state = vote.locked or "未确认"
-            status = "冲突待复核，旧结果暂留" if vote.recheck else ("已自动确认" if vote.locked else "检测中")
+            status = "已识别" if vote.locked is not None else "尚未看清"
             rows.append(f"{TOWER_NO[name]}号：{state}；{status}")
-        words = {'0': '空塔位', '1': '一层', '2': '两层', '红': '红顶', '蓝': '蓝顶'}
-        for name in DISPLAY:
-            vote = watch.votes[name]
-            if not vote.recheck:
-                continue
-            detail = self.conflict_results.get(name, {})
-            old = words.get(vote.locked, vote.locked or '未知')
-            new = words.get(detail.get('detected'), detail.get('detected') or '未知')
-            candidate = words.get(detail.get('candidate'), detail.get('candidate') or '待采样')
-            rows.append(f"【{TOWER_NO[name]}号冲突】原确认：{old}；新稳定识别：{new}；当前复核：{candidate}")
-            checks = len(self.pitch_checks[name])
-            progress = self.evidence[name].windows
-            rows.append(f"流程改为优先复核：旧结果暂留，不计完成；换姿态后重新采样，俯仰{checks}/{self.required_checks(name)}档、本档{progress}/{CONFIRM_WINDOWS}段")
-            action = self.action
-            if action is not None and action.kind == 'move':
-                rows.append("冲突后续：原地无可用复核姿态，换到新观察点，重新累计两档一致结果")
-            elif action is not None and action.kind == 'blocked':
-                rows.append("冲突后续：暂无安全有效观察点，保留冲突，等待条件变化后重试")
-            else:
-                rows.append("冲突后续：先原地换俯仰/朝向；两档一致才写入结果，原地用尽再换位")
-        if not any(v.recheck for v in watch.votes.values()):
-            resolved = [(name, items[-1]) for name, items in self.history.items()
-                        if items and items[-1]['event'] == 'resolved']
-            if resolved:
-                name, last = max(resolved, key=lambda item: item[1]['elapsed_s'])
-                rows.append(f"最近{TOWER_NO[name]}号冲突已解决：{words.get(last['previous'], last['previous'])}→{words.get(last['result'], last['result'])}，两档一致，已写入结果")
         rows.append(self.message)
         action = self.action
         if self.stop_until is not None:
@@ -560,20 +635,25 @@ class AutonomousSurvey:
                     rows.append(f"现在向{'左' if turn > 0 else '右'}转{abs(turn):.0f}°，车头转到{heading_words(math.degrees(yaw))}")
             if action.kind == "pitch":
                 rows.append(f"相机{format_pitch(pitch)}，车身位置不动")
-            if action.cell and action.kind != "move":
+            if action.cell and action.kind != "move" and self.observation_goal is None:
                 center = self.heading_center(action.cell)
-                headings = '、'.join(heading_words(center+delta) for delta in dict.fromkeys(GOAL_BEARING))
+                targets = self._targets(action.cell)
+                headings = '、'.join(heading_words(center+goal) for goal in dict.fromkeys(t[0] for t in targets))
                 rows.append(f"{TOWER_NO[action.cell]}号原地候选朝向：{headings}")
-                base_pitch = watch.views[action.cell].pitch_target_deg
-                pitches = '、'.join(format_pitch(base_pitch+d) for d in (0.,8.,-8.))
-                rows.append(f"每个朝向的相机姿态：{pitches}")
-                rows.append(f"当前第{action.attempt+1}/{MAX_TRIES}档；目标：{format_pitch(base_pitch+PITCH_OFFSET[action.attempt])}")
-                rows.append(f"俯仰复核{len(self.pitch_checks[action.cell])}/{self.required_checks(action.cell)}档：不同俯仰稳定结果一致才确认；出画档跳过")
+                pitches = '、'.join(format_pitch(pitch) for pitch in dict.fromkeys(t[1] for t in targets))
+                rows.append(f"候选相机俯仰（按需调整）：{pitches}")
+                rows.append(f"当前第{action.attempt+1}/{len(targets)}个候选；目标：{format_pitch(targets[action.attempt][1])}")
+                rows.append("获得有效识别结果即记住；仅未看清时继续调整视角")
             if action.kind == "move" and action.final_x is not None:
                 stood = CarPose(action.final_x, action.final_y, pose.yaw)
                 rows.append(f"观察落点：x={stood.x:+.3f} m y={stood.y:+.3f} m")
-                for look in _looks(stood, watch.setup.center_to_corner, watch.intr, target_names):
-                    rows.append(f"{look.number}号：yaw={look.yaw_deg:+.1f}° 俯仰={look.pitch_deg:+.1f}°")
+                if self.observation_goal is None:
+                    for look in _looks(stood, watch.setup.center_to_corner, watch.intr, target_names):
+                        rows.append(f"{look.number}号：yaw={look.yaw_deg:+.1f}° 俯仰={look.pitch_deg:+.1f}°")
+            if self.observation_goal is not None:
+                goal = self.observation_goal
+                rows.append(f"本次完整观测姿态：x={goal.observation_x:+.3f} m y={goal.observation_y:+.3f} m "
+                            f"yaw={math.degrees(goal.observation_yaw):+.1f}° 俯仰={goal.observation_pitch:+.1f}°；全部到位后计一次观测")
             if target_names:
                 rows.append("观察任务：" + "、".join(str(TOWER_NO[n])+"号" for n in target_names))
         if self.complete:
@@ -582,25 +662,30 @@ class AutonomousSurvey:
         return rows
 
     def route_display(self):
-        points = [(s.x,s.y) for s in self.primary_stops or []]
+        initial = self.initial_pose or self.watch.last_pose
+        points = [(initial.x,initial.y)] if initial is not None else []
+        kinds = ['初始点']
+        goal = self.observation_goal
+        if goal is not None:
+            points.append((goal.observation_x,goal.observation_y))
+            kinds.append('补充点')
         active = None
         if self.action is not None and self.action.kind == 'move':
             a = self.action
             active = [(self.watch.last_pose.x,self.watch.last_pose.y),(a.x,a.y)]
-        return dict(points=points, line=self.primary_line, active=active,
-                    index=self.primary_index, complete=self.complete,
-                    kinds=[s.kind for s in self.primary_stops or []],
-                    reserve_points=[(s.x,s.y) for s in self.reserve_stops],
-                    reserve_index=self.reserve_index)
+        return dict(points=points, line=[], active=active,
+                    index=len(points), complete=self.complete, kinds=kinds,
+                    reserve_points=[], reserve_index=0)
 
     def snapshot(self):
         return dict(coordinates="场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
                     next_action=asdict(self.action) if self.action is not None else None,
-                    pending=[n for n,v in self.watch.votes.items() if v.locked is None or v.recheck],
+                    pending=[n for n,v in self.watch.votes.items() if v.locked is None],
                     complete=self.complete, results={n: v.locked for n,v in self.watch.votes.items()},
                     route_plan=dict(primary=[asdict(s) for s in self.primary_stops or []],
                                     reserve=[asdict(s) for s in self.reserve_stops],
                                     reserve_index=self.reserve_index),
+                    observation_goal=asdict(self.observation_goal) if self.observation_goal else None,
                     metrics=self.metrics(),
                     pitch_checks=self.pitch_checks,
                     conflicts=[n for n,v in self.watch.votes.items() if v.recheck],

@@ -27,7 +27,7 @@ def test_ssh_search_box_visible_without_classification():
     assert not paint_window(color, None, {}, [], show_boxes=True).any()
 
 
-@pytest.mark.parametrize('distance,expected', [(1., '红'), (2., '蓝')])
+@pytest.mark.parametrize('distance,expected', [(1., '红'), (2., None)])
 def test_debug_exposes_truncated_upper_color_without_changing_result(distance, expected):
     intr = Intrinsics(400, 500, 900, 900, 200, 250)
     color = np.zeros((500, 400, 3), np.uint8)

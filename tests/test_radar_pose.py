@@ -210,3 +210,15 @@ def test_ssh_stream_reads_original_pose_and_invalidates_disconnect(monkeypatch):
     assert stream.match() is None
     assert 'SSH' in stream.error
     stream.close()
+
+
+
+def test_radar_text_distinguishes_sample_time_from_delay(monkeypatch):
+    import radar_pose
+    from car_pose import CarPose
+    monkeypatch.setattr(radar_pose.time, 'time', lambda: 1794746759.289841)
+    text = radar_pose.radar_pose_text(CarPose(0,0,0,1794746758.610841))
+    assert '采样时刻=' in text
+    assert '位姿延迟=679 ms' in text
+    assert '测量时间=' not in text
+    assert '1794746758' not in text

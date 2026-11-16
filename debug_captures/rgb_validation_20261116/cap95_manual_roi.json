@@ -1,0 +1,97 @@
+{
+  "rgb_cap": {
+    "candidates": 1,
+    "components": 21,
+    "checks": [
+      {
+        "id": 1,
+        "bbox": [
+          1110,
+          0,
+          170,
+          168
+        ],
+        "pixels": 26827,
+        "inside_pixels": 26827,
+        "coverage": 1.0,
+        "width_cm": 21.676253719010894,
+        "width_limit_cm": 40.0,
+        "height_cm": 21.419108244971817,
+        "fill": 0.9393207282913165,
+        "failures": [],
+        "side_visible_fraction": 0.0,
+        "red_pixels": 13599,
+        "blue_pixels": 11951,
+        "need": 2682,
+        "suspected": false,
+        "bottom_cm": 153.33312055204334,
+        "top_cm": 222.78673591045174,
+        "bottom_error_cm": 63.33312055204333,
+        "top_error_cm": 112.78673591045174,
+        "horizontal_overlap": 1.0,
+        "vertical_gap_px": 42.481050147328745,
+        "result": "红"
+      },
+      {
+        "id": 8,
+        "bbox": [
+          936,
+          318,
+          18,
+          36
+        ],
+        "pixels": 574,
+        "inside_pixels": 574,
+        "coverage": 1.0,
+        "width_cm": 2.2951327467188007,
+        "width_limit_cm": 40.0,
+        "height_cm": 4.589808909636818,
+        "fill": 0.8858024691358025,
+        "failures": [
+          "红或蓝面积不足（可能单色/断开）"
+        ],
+        "side_visible_fraction": 1.0,
+        "red_pixels": 542,
+        "blue_pixels": 0,
+        "need": 57,
+        "suspected": false
+      },
+      {
+        "id": 9,
+        "bbox": [
+          864,
+          328,
+          12,
+          8
+        ],
+        "pixels": 34,
+        "inside_pixels": 26,
+        "coverage": 0.7647058823529411,
+        "width_cm": 1.5300884978125338,
+        "width_limit_cm": 40.0,
+        "height_cm": 1.0199575354748482,
+        "fill": 0.3541666666666667,
+        "failures": [
+          "填充率不足45%",
+          "格内覆盖不足90%",
+          "红或蓝面积不足（可能单色/断开）"
+        ],
+        "side_visible_fraction": 1.0,
+        "red_pixels": 0,
+        "blue_pixels": 22,
+        "need": 8,
+        "suspected": false
+      }
+    ],
+    "state": "confirmed",
+    "suspected_components": [],
+    "distance_m": 1.16,
+    "pitch_deg": -0.3,
+    "roll_deg": -0.3,
+    "yaw_deg": 0.0,
+    "expected_bottom_cm": 90.0,
+    "expected_top_cm": 110.00000000000001,
+    "close_radius_px": 3,
+    "reason": "唯一候选通过"
+  }
+}

@@ -90,11 +90,14 @@ def test_camera_entry_preserves_corner_in_all_modes(monkeypatch):
             assert (captured[-1].x, captured[-1].y, captured[-1].yaw) == (1.2, .4, yaw)
 
 
-def test_station_panel_lists_all_scan_headings_without_claiming_completion():
+def test_station_panel_gives_one_fixed_pose_without_scan_lists():
     from map_test import stop_lines
     from motion import RouteStop, Look
     text = '\n'.join(stop_lines([RouteStop(0,0,(Look('1',62.,-1.),))],0))
-    assert '左62°、左70°、左54°、左78°、左46°、左86°、左38°' in text
+    assert '先朝左62°' in text
+    assert '未看清时可尝试' not in text
+    assert '基准上下' not in text
+    assert '固定姿态' in text
     assert '相机低头到 1 度' in text
     assert '完成识别' not in text
-    assert '不是每次再转这么多' in text
+    assert '每个补充点仅一组朝向和俯仰' in text
