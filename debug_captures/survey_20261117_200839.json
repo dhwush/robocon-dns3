@@ -1,0 +1,196 @@
+{
+  "coordinates": "场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
+  "awaiting_start": false,
+  "camera_stability": {
+    "settled": false,
+    "samples": 1,
+    "reason": "有效采样不足3次",
+    "duration_s": 0.0,
+    "position_span_m": 0.0,
+    "yaw_span_deg": 0.0,
+    "pitch_span_deg": 0.0,
+    "roll_span_deg": 0.0
+  },
+  "camera_ready": false,
+  "initial_pose": {
+    "x": 2.1541967481964197,
+    "y": 2.95812663951649,
+    "yaw": 1.8109613878240653,
+    "stamp": 1794917462.5406325
+  },
+  "initial_pitch": -6.547778304941103,
+  "next_action": {
+    "kind": "move",
+    "text": "同时向前平移 0.08 米，向右平移 0.66 米",
+    "pitch": null,
+    "yaw": null,
+    "x": 1.921096612712333,
+    "y": 3.5751727781003995,
+    "cell": null,
+    "attempt": 0,
+    "final_x": 1.8955659831189773,
+    "final_y": 3.9243623570557262,
+    "chase_to": "joint",
+    "cells": [
+      "最近右侧地面"
+    ],
+    "observation_x": null,
+    "observation_y": null,
+    "observation_yaw": null,
+    "observation_pitch": null,
+    "observation_fallback": false
+  },
+  "pending": [
+    "最近左侧地面",
+    "最近一行左侧",
+    "第三行左侧",
+    "最近右侧地面",
+    "右侧地面远一格"
+  ],
+  "complete": false,
+  "results": {
+    "最近左侧地面": null,
+    "最近一行左侧": null,
+    "第三行左侧": null,
+    "最近一行右侧": "1",
+    "最近右侧地面": null,
+    "右侧地面远一格": null
+  },
+  "route_plan": {
+    "primary": [
+      {
+        "x": 2.1541967481964197,
+        "y": 2.95812663951649,
+        "looks": [],
+        "kind": "初始点",
+        "fallback": false
+      },
+      {
+        "x": 1.9148525925367008,
+        "y": 3.6396990382419174,
+        "looks": [
+          {
+            "number": "4",
+            "yaw_deg": 174.0755027356302,
+            "pitch_deg": 1.1841497931764988
+          },
+          {
+            "number": "5",
+            "yaw_deg": 174.0755027356302,
+            "pitch_deg": 1.1841497931764988
+          }
+        ],
+        "kind": "补充点1",
+        "fallback": false
+      },
+      {
+        "x": -0.2882122556509216,
+        "y": 0.2020793927278001,
+        "looks": [
+          {
+            "number": "1",
+            "yaw_deg": 46.96377763965502,
+            "pitch_deg": 2.151434215835511
+          },
+          {
+            "number": "2",
+            "yaw_deg": 46.96377763965502,
+            "pitch_deg": 2.151434215835511
+          }
+        ],
+        "kind": "补充点2",
+        "fallback": false
+      }
+    ],
+    "primary_index": 1,
+    "additional": [],
+    "reserve": [],
+    "reserve_index": 0
+  },
+  "observation_goal": {
+    "kind": "wait",
+    "text": "补充观测",
+    "pitch": null,
+    "yaw": null,
+    "x": null,
+    "y": null,
+    "cell": null,
+    "attempt": 0,
+    "final_x": null,
+    "final_y": null,
+    "chase_to": null,
+    "cells": [
+      "最近右侧地面"
+    ],
+    "observation_x": 1.9148525925367008,
+    "observation_y": 3.6396990382419174,
+    "observation_yaw": 3.0381906698011436,
+    "observation_pitch": 1.1841497931764988,
+    "observation_fallback": false
+  },
+  "metrics": {
+    "observation_unit": "settled_pose",
+    "distance_m": 0.268,
+    "observation_count": 1,
+    "observations": [
+      {
+        "cell": "最近左侧地面",
+        "cells": [
+          "最近左侧地面",
+          "最近一行左侧",
+          "第三行左侧",
+          "最近一行右侧"
+        ],
+        "attempt": 0,
+        "x": 2.154650816344377,
+        "y": 2.954832731263741,
+        "yaw_deg": 103.67649786276584,
+        "pitch_deg": -6.5409144070576275,
+        "elapsed_s": 23.24981667099928
+      }
+    ],
+    "manual_confirmed": []
+  },
+  "pitch_checks": {
+    "最近左侧地面": [],
+    "最近一行左侧": [],
+    "第三行左侧": [],
+    "最近一行右侧": [],
+    "最近右侧地面": [],
+    "右侧地面远一格": []
+  },
+  "conflicts": [],
+  "conflict_results": {},
+  "history": {
+    "最近左侧地面": [],
+    "最近一行左侧": [],
+    "第三行左侧": [],
+    "最近一行右侧": [
+      {
+        "event": "confirmed",
+        "result": "1",
+        "previous": null,
+        "elapsed_s": 23.24981667099928,
+        "x": 2.154650816344377,
+        "y": 2.954832731263741,
+        "yaw_deg": 103.67649786276584,
+        "pitch_deg": -6.5409144070576275
+      }
+    ],
+    "最近右侧地面": [],
+    "右侧地面远一格": []
+  },
+  "instructions": [
+    "1号：未确认；尚未看清",
+    "2号：未确认；尚未看清",
+    "3号：未确认；尚未看清",
+    "4号：1；已识别",
+    "5号：未确认；尚未看清",
+    "6号：未确认；尚未看清",
+    "执行换点指令，到位稳定后重新扫描",
+    "下一步（场地原点/右前角）：x=+1.921 m y=+3.575 m yaw=+96.8° 俯仰=-6.4°",
+    "观察落点：x=+1.896 m y=+3.924 m",
+    "本次完整观测姿态：x=+1.915 m y=+3.640 m yaw=+174.1° 俯仰=+1.2°；全部到位后计一次观测",
+    "观察任务：5号"
+  ]
+}

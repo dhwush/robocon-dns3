@@ -9,7 +9,8 @@ import pytest
 
 @pytest.mark.parametrize('source', ['static', 'radar', 'ros', 'laptop', 'host'])
 @pytest.mark.parametrize('headless', [False, True])
-def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source, headless, capsys):
+@pytest.mark.parametrize('drop_after_valid', [False, True])
+def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source, headless, drop_after_valid, capsys):
     import cv2
     import view_field as vf
     from car_pose import CarPose, Setup, load_intrinsics
@@ -57,12 +58,14 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
         votes=votes,message='等待稳定',lines=lambda: ['等待稳定'],route_display=lambda: {})
     # _live沿用已有会话，保留自主状态提示分支，隔离识别算法与硬件。
     seen = []
+    reused = []
     watch = SimpleNamespace(votes=votes,autonomy=None,
         setup=Setup(False,np.zeros(2),0.,'', 'rad',True),light='daylight',pitch=0.,roll=0.,
-        follow_pitch=lambda value: None,update=lambda pose,image,depth: seen.append(image),
+        follow_pitch=lambda value: None,update=lambda pose,image,depth: (seen.append(image),reused.append(getattr(watch,'pose_reused',False))),
         views={},lines=lambda mode: ['测试'],window_lines=lambda mode: ['光线 白天'],required_pitch=lambda: 0.)
     session.watch = watch
-    matches = iter([None, CarPose(0,0,0), CarPose(0,0,0)])
+    matches = iter([CarPose(0,0,0),None,CarPose(0,0,0)] if drop_after_valid
+                   else [None, CarPose(0,0,0), CarPose(0,0,0)])
     stream = SimpleNamespace(match=lambda stamp: next(matches),close=lambda: None,
                              process=SimpleNamespace(poll=lambda: None))
     monkeypatch.setattr('can_pose.CanPoseStream',lambda *args: stream)
@@ -70,10 +73,24 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
     monkeypatch.setattr(vf, 'open_radar', lambda args: pytest.fail('手动模式不应读取雷达') if source == 'static' else stream)
     args = SimpleNamespace(mode='basic',pose_source=source,offline=False,headless=headless,survey_session=session,
         survey_report=tmp_path/'report.json')
+    watermarks=[]
+    if drop_after_valid and source!='static':
+        frames['stamp']=2.
+        first=(color,frames['depth'],None,1.,1.)
+        recovered=(color,frames['depth'],None,3.,3.)
+        frames['history']=[first,recovered]
+        pairings=iter([(first,CarPose(0,0,0,1.)),None,(recovered,CarPose(0,0,0,3.))])
+        def pair(history,radar,after):
+            watermarks.append(after)
+            return next(pairings)
+        monkeypatch.setattr(vf,'matched_camera_frame',pair)
     assert vf._live(args,watch,CarPose(0,0,0)) == ['测试']
-    assert len(seen) == (3 if source == 'static' else 2)
+    assert len(seen) == (3 if source == 'static' or drop_after_valid else 2)
+    if source != 'static' and drop_after_valid:
+        assert reused == [False,True,False]
+        assert watermarks == [float('-inf'),1.,1.]  # 缓存图像不能吞掉恢复后的历史配对。
     assert pauses == [True]  # 仅重开相机时完整暂停；断流不能再次调用。
-    assert len(suspensions) == (0 if source == 'static' else 1)
+    assert len(suspensions) == (0 if source == 'static' or drop_after_valid else 1)
     assert isinstance(frames,dict) and frames['color'] is color
     assert args.autonomous_map_lines[2].startswith('待测塔：')
     assert stopped == [True]
@@ -117,7 +134,8 @@ def test_history_does_not_revive_stale_pose(monkeypatch):
 
 
 @pytest.mark.parametrize('source', ['laptop','host'])
-def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tmp_path, source):
+@pytest.mark.parametrize('between_frames', [False, True])
+def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tmp_path, source, between_frames):
     import cv2
     import view_field as vf
     from car_pose import CarPose, Setup, load_intrinsics
@@ -132,7 +150,8 @@ def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tm
     frames = dict(color=color,depth=np.ones((8,8)),gravity=np.zeros(3),stamp=1.,received=1.,
                   intrinsics=intr,camera=dict(serial_number='test',distortion_model='none',distortion_coefficients=[]))
     pipeline = SimpleNamespace(stop=lambda:None)
-    ready = SimpleNamespace(wait=lambda timeout:True,clear=lambda:None)
+    frame_ready = iter([True, False, True, True] if between_frames else [True, True, True])
+    ready = SimpleNamespace(wait=lambda timeout:next(frame_ready),clear=lambda:None)
     monkeypatch.setattr(vf,'_open_camera',lambda rs:(pipeline,None,ready,threading.Lock(),frames))
     monkeypatch.setattr(vf,'_apply_light',lambda *a:None)
     monkeypatch.setattr(vf,'paint_window',lambda image,*a,**k:image)
@@ -147,7 +166,7 @@ def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tm
     pressed = CarPose(-2.3,.2,1.2)
     poses = iter([initial,pressed,pressed])
     stream = SimpleNamespace(match=lambda stamp=None:next(poses),error='',close=lambda:None)
-    keys = iter([-1,ord('b'),ord('q')])
+    keys = iter([-1,ord('b'),-1,ord('q')] if between_frames else [-1,ord('b'),ord('q')])
     def key(delay):
         result = next(keys)
         if result == ord('b'):

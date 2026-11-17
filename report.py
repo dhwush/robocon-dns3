@@ -206,6 +206,9 @@ class FieldWatch:
         self.stable_frames = 0
         self.camera_stability = CameraStability()
         self.camera_settled = False
+        self.pose_reused = False
+        self.live_motion_guard = False
+        self.held_pitch = self.held_roll = None
         self.stability_reason='等待有效采样'
         self.parallax_origins = {}
         self.local_rgb_tracks = {}
@@ -296,7 +299,22 @@ class FieldWatch:
         now = self.autonomy.clock() if self.autonomy is not None else time.monotonic()
         valid = color is not None and getattr(self,"pitch_measurement_valid",True)
         samples = getattr(self,'stability_samples',None)
-        if samples is not None:
+        reused = getattr(self,'pose_reused',False)
+        action = self.autonomy.action if self.autonomy is not None else self.hold
+        preparing = (action is not None and action.kind in ('move','yaw','pitch'))
+        if self.autonomy is not None and self.autonomy.stop_until is not None:
+            preparing = True
+        if reused:
+            # 缓存位姿只能延续此前已经证实的停稳，不能制造新停稳或确认移动到位。
+            self.camera_settled = bool(self.camera_settled and valid and not preparing
+                and self.held_pitch is not None and self.held_roll is not None
+                and abs(self.pitch-self.held_pitch)<=1.
+                and abs(self.roll-self.held_roll)<=1.)
+            if not self.camera_settled:
+                self.camera_stability.reset()
+                self.stability_after_stamp=max(getattr(self,'stability_after_stamp',float('-inf')),
+                                              getattr(self,'pose_frame_stamp',pose.stamp))
+        elif samples is not None:
             self.camera_stability.reset()
             after = getattr(self,'stability_after_stamp',float('-inf'))
             for sampled,pitch,roll,sampled_at in samples:
@@ -309,6 +327,8 @@ class FieldWatch:
                 self.stable_frames = max(self.stable_frames,self.camera_stability.samples)
         else:
             self.camera_settled = self.camera_stability.update(pose,self.pitch,self.roll,now,valid=valid)
+        if not reused and self.camera_settled:
+            self.held_pitch,self.held_roll=self.pitch,self.roll
         self.stability_reason=self.camera_stability.reason
         if not valid:
             self.stability_reason='画面或相机姿态无效'
@@ -316,6 +336,11 @@ class FieldWatch:
             self.stability_reason='没有时间匹配的有效历史采样'
         elif self.camera_stability.settled and not self.camera_settled:
             self.stability_reason='当前位姿与停稳采样时间偏差超过0.15秒'
+        if reused:
+            self.stability_reason=('沿用上一有效位姿，保持此前停稳状态' if self.camera_settled
+                                   else '沿用上一有效位姿，移动后须等待新雷达数据验证停稳')
+        if self.live_motion_guard and (preparing or not self.camera_settled):
+            color = depth = None
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(

@@ -193,6 +193,8 @@ def test_ssh_stream_reads_original_pose_and_invalidates_disconnect(monkeypatch):
     process = SimpleNamespace(stdout=io.StringIO(json.dumps(payload)+'\n'), poll=lambda: 0)
     def spawn(command, **kwargs):
         commands.append(command)
+        assert kwargs['stdin'] == radar.subprocess.DEVNULL
+        assert '-n' in command
         return process
     monkeypatch.setattr(radar.subprocess, 'Popen', spawn)
     original = radar.RadarPoseStream.accept

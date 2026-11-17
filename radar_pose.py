@@ -153,11 +153,13 @@ while True:
 class SshRadarPoseStream(RadarPoseStream):
     def __init__(self, host, url='http://127.0.0.1:8765/pose', reference='corner'):
         super().__init__(url, reference, start=False)
-        command = ['ssh', '-T', '-o', 'ConnectTimeout=8',
+        command = ['ssh', '-n', '-T', '-o', 'ConnectTimeout=8',
                    '-o', 'ServerAliveInterval=2', '-o', 'ServerAliveCountMax=3',
                    '--', host, 'python3 -u -c ' + shlex.quote(SSH_READER) + ' ' + shlex.quote(url)]
         print(f'通过 SSH 读取主机 {host} 的雷达服务；如需密码，请在终端输入。', flush=True)
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, bufsize=1)
+        # 后台读取只接收数据，禁止继承界面终端输入，避免SSH抢走操作按键。
+        self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, text=True, bufsize=1)
         self.thread = threading.Thread(target=self._read_ssh, daemon=True)
         self.thread.start()
 

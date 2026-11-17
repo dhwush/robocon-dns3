@@ -1,4 +1,4 @@
-"""SSH 终端输入；不初始化 OpenCV 的图形后端。"""
+"""终端与图形窗口共用按键；无界面模式不初始化图形后端。"""
 import select
 import sys
 
@@ -9,9 +9,20 @@ class LiveUI:
         self.headless=headless
         self.input_stream=sys.stdin if input_stream is None else input_stream
         self.saved_terminal=None
+        self.owned_terminal=None
+        self.input_status="终端输入尚未初始化"
 
     def start_input(self):
-        if not self.headless or not self.input_stream.isatty():
+        if not self.input_stream.isatty() and self.input_stream is sys.stdin:
+            # SSH/启动脚本可能重定向stdin；从当前会话的控制终端接收按键。
+            try:
+                self.owned_terminal=open('/dev/tty', 'r')
+                self.input_stream=self.owned_terminal
+            except OSError:
+                self.input_status='未连接交互终端：SSH请使用 ssh -tt，启动时不要使用 ssh -n 或后台运行'
+                return
+        if not self.input_stream.isatty():
+            self.input_status='输入为管道：命令需要回车'
             return
         import termios
         import tty
@@ -20,17 +31,28 @@ class LiveUI:
         settings=termios.tcgetattr(self.input_stream.fileno())
         settings[3] &= ~termios.ECHO
         termios.tcsetattr(self.input_stream.fileno(),termios.TCSANOW,settings)
+        import os
+        self.input_status=f'终端按键已启用（{os.ttyname(self.input_stream.fileno())}）：b/c/d/n/s/1-5/q，无需回车'
 
     def close_input(self):
         if self.saved_terminal is not None:
             import termios
             termios.tcsetattr(self.input_stream.fileno(),termios.TCSANOW,self.saved_terminal)
             self.saved_terminal=None
+        if self.owned_terminal is not None:
+            self.owned_terminal.close()
+            self.owned_terminal=None
 
     def waitKey(self, delay):
         if not self.headless:
-            return self.backend.waitKey(delay)
-        if not select.select([self.input_stream],[],[],max(0,delay)/1000)[0]:
+            # 每轮仍泵送OpenCV事件；图形模式同时读取已启用的真实终端。
+            key = self.backend.waitKey(delay)
+            if key & 0xFF != 0xFF:
+                return key
+            if self.saved_terminal is None:
+                return -1
+        timeout = max(0,delay)/1000 if self.headless else 0
+        if not select.select([self.input_stream],[],[],timeout)[0]:
             return -1
         if self.saved_terminal is not None:
             import os
@@ -158,6 +180,7 @@ class TerminalDashboard:
         self.known={}
         self.event=''
         self.notice=''
+        self.input_status=''
 
     def show(self,watch,pose,pitch,notice=None):
         rows,key,confirmed=terminal_status(watch,pose,pitch)
@@ -171,6 +194,9 @@ class TerminalDashboard:
         if notice is not None:
             self.notice=notice
         at=next(i for i,row in enumerate(rows) if row.startswith('命令：'))
+        if self.input_status:
+            rows.insert(at, '输入通道：'+self.input_status)
+            at += 1
         rows[at:at]=['最近完成：'+(self.event or '尚无已确认结果'),
                      '操作反馈：'+(self.notice or '等待命令')]
         key=(key,self.event,self.notice)

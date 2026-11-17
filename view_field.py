@@ -551,20 +551,34 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
         raise
     previous = ""
     initial_radar_pose = None
+    last_valid_radar_pose = getattr(watch,'last_pose',None)
+    watch.live_motion_guard = radar_stream is not None
     last_processed_stamp = float("-inf")
     light = watch.light
     exposure_wait = 5
     debug_visible = False
     debug_selected = 0
+    pending_start = False
+    from collections import deque
+    pending_commands = deque()
     from tower_debug import paint_diagnostics, save_capture
     try:
         ui.start_input()
+        dashboard.input_status = ui.input_status
+        dashboard.notice = ui.input_status
+        print(ui.input_status, flush=True)
         _apply_light(sensor, rs, light)
         while True:
             if not ready.wait(0.05):
                 key = ui.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     return watch.lines(args.mode)
+                if key in (ord('b'), ord('B')):
+                    pending_start = True
+                    dashboard.show(watch, None, None, notice='已收到 b，等待下一帧同步数据后确认起点')
+                elif key != 0xFF:
+                    pending_commands.append(key)
+                    dashboard.show(watch,None,None,notice=f'已收到按键 {chr(key)}，等待相机画面后执行')
                 continue
             ready.clear()
             with lock:
@@ -578,6 +592,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if color is None or depth is None:
                 continue
             current = pose
+            watch.pose_reused = False
             if radar_stream is not None:
                 if "history" in camera_frames:
                     pairing = matched_camera_frame(history, radar_stream, last_processed_stamp)
@@ -586,11 +601,10 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                         color, depth, gravity, stamp, received = pairing[0]
                 else:
                     matched = getattr(radar_stream, "match_frame", radar_stream.match)(stamp)
-                if matched is None and history and np.isfinite(last_processed_stamp) and radar_stream.match() is not None:
-                    # 同一个5Hz位姿对应的画面已处理完；等待新测量，不重复计票。
-                    if ui.waitKey(1) & 0xFF in (ord("q"), 27):
-                        return watch.lines(args.mode)
-                    continue
+                if matched is None and last_valid_radar_pose is not None:
+                    # 不伪造时间戳或停稳采样；使用最新图像和最近一次真实位姿。
+                    matched = last_valid_radar_pose
+                    watch.pose_reused = True
                 if matched is None:
                     suspend_for_radar(watch)
                     message = '等待定位与画面同步，暂停识别和移动；恢复后自动继续'
@@ -609,16 +623,25 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     elif previous != message:
                         print(message, flush=True)
                         previous = message
-                    if ui.waitKey(1) & 0xFF in (ord("q"), 27):
+                    key = ui.waitKey(1) & 0xFF
+                    if key in (ord("q"), 27):
                         return watch.lines(args.mode)
+                    if pending_start or key in (ord('b'), ord('B')):
+                        pending_start = False
+                        dashboard.show(watch,None,None,notice='已收到 b，但定位与画面尚未同步；恢复后请重新按 b')
                     continue
                 current = matched
+                if not watch.pose_reused:
+                    last_valid_radar_pose = current
                 if initial_radar_pose is None:
                     initial_radar_pose = current
             elif not watch.setup.origin_basic:
                 print("没有实时车位，暂停识别")
                 return watch.lines(args.mode)
-            last_processed_stamp = stamp
+            # 缓存位姿处理了较新的图像，也不能跳过稍后到达雷达所匹配的历史帧。
+            if not watch.pose_reused:
+                last_processed_stamp = stamp
+            watch.pose_frame_stamp = stamp
             measured = pitch_from_gravity(gravity)
             rolled = roll_from_gravity(gravity)
             watch.pitch_measurement_valid = (measured is not None and rolled is not None
@@ -664,16 +687,24 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             result_mode = args.mode
             lines = watch.lines(result_mode)
             shown = watch.window_lines(result_mode)
+            if watch.pose_reused:
+                shown = list(shown) + ['雷达暂无匹配新数据：沿用上一有效位姿；移动及停稳验证期间不识别']
             text = "\n".join(shown)
             if dashboard is not None:
                 # 识别画面可能较旧；面板优先读取此刻有效的雷达与IMU反馈。
-                live_pose = radar_stream.match() if hasattr(radar_stream,'measurements_between') else current
+                live_pose = (radar_stream.match() or current) if hasattr(radar_stream,'measurements_between') else current
                 with lock:
                     live_gravity = camera_frames.get("gravity")
                     live_pitch = pitch_from_gravity(live_gravity)
                 if dashboard.notice == '等待定位与画面同步，暂停识别和移动；恢复后自动继续':
                     dashboard.notice=''
-                dashboard.show(watch,live_pose,live_pitch)
+                held_notice='雷达暂无匹配新数据：沿用上一有效位姿；移动及停稳验证期间不识别'
+                if watch.pose_reused:
+                    dashboard.show(watch,live_pose,live_pitch,notice=held_notice)
+                else:
+                    if dashboard.notice == held_notice:
+                        dashboard.notice=''
+                    dashboard.show(watch,live_pose,live_pitch)
             elif text != previous:
                 print(text, flush=True)
                 previous = text
@@ -707,8 +738,18 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             key = ui.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
                 return lines
-            if (key in (ord('b'), ord('B')) and watch.autonomy is not None
-                    and getattr(watch.autonomy, 'awaiting_start', False)):
+            if key != 0xFF:
+                pending_commands.append(key)
+            key = pending_commands.popleft() if pending_commands else 0xFF
+            if key != 0xFF:
+                dashboard.notice = f'已收到按键：{chr(key)}'
+
+            start_requested = pending_start or key in (ord('b'), ord('B'))
+            pending_start = False
+            if start_requested and (watch.autonomy is None or not getattr(watch.autonomy, 'awaiting_start', False)):
+                dashboard.show(watch,current,measured,notice='已收到 b：当前不处于等待开始状态，无需重复开始')
+                continue
+            if start_requested:
                 # current与measured来自同一组已配对的相机/雷达数据。
                 if watch.autonomy.confirm_start(current, measured):
                     args.autonomous_route = watch.autonomy.route_display()

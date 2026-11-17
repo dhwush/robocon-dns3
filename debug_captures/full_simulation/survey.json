@@ -1,0 +1,260 @@
+{
+  "coordinates": "场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
+  "awaiting_start": false,
+  "camera_stability": {
+    "settled": true,
+    "samples": 6,
+    "reason": "已停稳",
+    "duration_s": 1.0,
+    "position_span_m": 0.0,
+    "yaw_span_deg": 0.0,
+    "pitch_span_deg": 0.0,
+    "roll_span_deg": 0.0
+  },
+  "camera_ready": true,
+  "initial_pose": {
+    "x": 0.2,
+    "y": 0.0,
+    "yaw": 0.0,
+    "stamp": 1000.0
+  },
+  "initial_pitch": 0.0,
+  "next_action": {
+    "kind": "blocked",
+    "text": "暂无安全中距离补充点",
+    "pitch": null,
+    "yaw": null,
+    "x": null,
+    "y": null,
+    "cell": null,
+    "attempt": 0,
+    "final_x": null,
+    "final_y": null,
+    "chase_to": null,
+    "cells": [],
+    "observation_x": null,
+    "observation_y": null,
+    "observation_yaw": null,
+    "observation_pitch": null,
+    "observation_fallback": false
+  },
+  "pending": [
+    "第三行左侧",
+    "右侧地面远一格"
+  ],
+  "complete": false,
+  "results": {
+    "最近左侧地面": "1",
+    "最近一行左侧": "2",
+    "第三行左侧": null,
+    "最近一行右侧": "蓝",
+    "最近右侧地面": "0",
+    "右侧地面远一格": null
+  },
+  "route_plan": {
+    "primary": [
+      {
+        "x": 0.2,
+        "y": 0.0,
+        "looks": [],
+        "kind": "初始点",
+        "fallback": false
+      },
+      {
+        "x": -0.19498400705340657,
+        "y": -0.08073768247751786,
+        "looks": [
+          {
+            "number": "1",
+            "yaw_deg": 35.74018147871253,
+            "pitch_deg": 0.541517805316211
+          },
+          {
+            "number": "2",
+            "yaw_deg": 35.74018147871253,
+            "pitch_deg": 0.541517805316211
+          }
+        ],
+        "kind": "补充点1",
+        "fallback": false
+      },
+      {
+        "x": 1.9272414535205142,
+        "y": 3.4474187047586486,
+        "looks": [
+          {
+            "number": "4",
+            "yaw_deg": 173.28617305048948,
+            "pitch_deg": 1.2672586981911773
+          },
+          {
+            "number": "5",
+            "yaw_deg": 173.28617305048948,
+            "pitch_deg": 1.2672586981911773
+          }
+        ],
+        "kind": "补充点2",
+        "fallback": false
+      }
+    ],
+    "primary_index": 3,
+    "additional": [
+      {
+        "x": 1.9272414535205142,
+        "y": 3.7474187047586485,
+        "looks": [
+          {
+            "number": "5",
+            "yaw_deg": 173.28617305048948,
+            "pitch_deg": 0.0
+          }
+        ],
+        "kind": "补充点1",
+        "fallback": false
+      }
+    ],
+    "reserve": [],
+    "reserve_index": 0
+  },
+  "observation_goal": null,
+  "metrics": {
+    "observation_unit": "settled_pose",
+    "distance_m": 6.691,
+    "observation_count": 4,
+    "observations": [
+      {
+        "cell": "第三行左侧",
+        "cells": [
+          "第三行左侧"
+        ],
+        "attempt": 0,
+        "x": 0.2,
+        "y": 0.0,
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "elapsed_s": 0.8000000000001819
+      },
+      {
+        "cell": "最近左侧地面",
+        "cells": [
+          "最近左侧地面",
+          "最近一行左侧"
+        ],
+        "attempt": 0,
+        "x": -0.19498400705340657,
+        "y": -0.08073768247751786,
+        "yaw_deg": 35.74018147871253,
+        "pitch_deg": 0.0,
+        "elapsed_s": 3.2000000000007276
+      },
+      {
+        "cell": "最近一行右侧",
+        "cells": [
+          "最近一行右侧",
+          "最近右侧地面"
+        ],
+        "attempt": 0,
+        "x": 1.9272414535205142,
+        "y": 3.4474187047586486,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0,
+        "elapsed_s": 8.000000000001819
+      },
+      {
+        "cell": "最近右侧地面",
+        "cells": [
+          "最近右侧地面"
+        ],
+        "attempt": 0,
+        "x": 1.9272414535205142,
+        "y": 3.7474187047586485,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0,
+        "elapsed_s": 11.200000000002547
+      }
+    ],
+    "manual_confirmed": []
+  },
+  "pitch_checks": {
+    "最近左侧地面": [],
+    "最近一行左侧": [],
+    "第三行左侧": [],
+    "最近一行右侧": [],
+    "最近右侧地面": [],
+    "右侧地面远一格": []
+  },
+  "conflicts": [],
+  "conflict_results": {},
+  "history": {
+    "最近左侧地面": [
+      {
+        "event": "confirmed",
+        "result": "1",
+        "previous": null,
+        "elapsed_s": 3.2000000000007276,
+        "x": -0.19498400705340657,
+        "y": -0.08073768247751786,
+        "yaw_deg": 35.74018147871253,
+        "pitch_deg": 0.0
+      }
+    ],
+    "最近一行左侧": [
+      {
+        "event": "confirmed",
+        "result": "2",
+        "previous": null,
+        "elapsed_s": 3.2000000000007276,
+        "x": -0.19498400705340657,
+        "y": -0.08073768247751786,
+        "yaw_deg": 35.74018147871253,
+        "pitch_deg": 0.0
+      }
+    ],
+    "第三行左侧": [],
+    "最近一行右侧": [
+      {
+        "event": "confirmed",
+        "result": "蓝",
+        "previous": null,
+        "elapsed_s": 8.000000000001819,
+        "x": 1.9272414535205142,
+        "y": 3.4474187047586486,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0
+      }
+    ],
+    "最近右侧地面": [
+      {
+        "event": "observation_timeout",
+        "result": null,
+        "previous": null,
+        "elapsed_s": 10.000000000002274,
+        "x": 1.9272414535205142,
+        "y": 3.4474187047586486,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0
+      },
+      {
+        "event": "confirmed",
+        "result": "0",
+        "previous": null,
+        "elapsed_s": 11.200000000002547,
+        "x": 1.9272414535205142,
+        "y": 3.7474187047586485,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0
+      }
+    ],
+    "右侧地面远一格": []
+  },
+  "instructions": [
+    "1号：1；已识别",
+    "2号：2；已识别",
+    "3号：未确认；尚未看清",
+    "4号：蓝；已识别",
+    "5号：0；已识别",
+    "6号：未确认；尚未看清",
+    "暂无能看到剩余塔的安全中距离补充点，保留未观测目标",
+    "停止！暂无安全有效观察点，等待后续指令"
+  ]
+}

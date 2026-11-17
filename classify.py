@@ -3353,15 +3353,48 @@ def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
     ys, xs = np.nonzero(patch)
     if len(xs) < 30:
         return False
+    # 先检查完整投影中的连续凸起，不能让内缩或总体占比掩盖小物体。
     values = depth[ys, xs]
     valid = np.isfinite(values) & (values >= _DEPTH_NEAR_M) & (values <= _DEPTH_FAR_M)
-    if valid.mean() < 0.80:
-        return False
     origin, right, down, ahead = camera_frame(pose, offset, pitch, roll)
-    xs, ys, values = xs[valid], ys[valid], values[valid]
     world = (origin + ((xs-intr.cx)*values/intr.fx)[:,None]*right
              + ((ys-intr.cy)*values/intr.fy)[:,None]*down + values[:,None]*ahead)
-    return bool(np.mean(np.abs(world[:,2]-cell.base_z) <= 0.03) >= 0.95)
+    raised = (valid & (world[:,2] > cell.base_z + .05)
+              & (world[:,0] >= x0) & (world[:,0] <= x1)
+              & (world[:,1] >= y0) & (world[:,1] <= y1))
+    objects = np.zeros(depth.shape, np.uint8)
+    objects[ys[raised], xs[raised]] = 1
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(objects, 8)
+    for index in range(1, count):
+        if stats[index, cv2.CC_STAT_AREA] < 8:
+            continue
+        points = world[raised][labels[ys[raised], xs[raised]] == index]
+        if np.max(np.ptp(points[:,:2], axis=0)) >= .04:
+            return False
+    # 剔除一像素边缘带；整体覆盖率与高度门槛保持原值。
+    inner = cv2.erode(patch, np.ones((3,3), np.uint8),
+                      borderType=cv2.BORDER_CONSTANT, borderValue=0)
+    keep = inner[ys,xs] > 0
+    if keep.sum() < 30:
+        return False
+    ys, xs, values, valid, world = (a[keep] for a in (ys,xs,values,valid,world))
+    support = valid & (np.abs(world[:,2]-cell.base_z) <= .03)
+    if valid.mean() < .80 or support.sum()/max(1, valid.sum()) < .95:
+        return False
+    # 按预期底面坐标分四区，避免深度空洞集中在某一区仍判空。
+    rays = (((xs-intr.cx)/intr.fx)[:,None]*right
+            + ((ys-intr.cy)/intr.fy)[:,None]*down + ahead)
+    if np.any(np.abs(rays[:,2]) < 1e-6):
+        return False
+    floor = origin + rays*((cell.base_z-origin[2])/rays[:,2])[:,None]
+    quadrants = (floor[:,0] >= (x0+x1)/2).astype(int) + 2*(floor[:,1] >= (y0+y1)/2)
+    for quadrant in range(4):
+        region = quadrants == quadrant
+        if region.sum() < 5 or valid[region].mean() < .65:
+            return False
+        if support[region].sum()/max(1,valid[region].sum()) < .90:
+            return False
+    return True
 
 
 

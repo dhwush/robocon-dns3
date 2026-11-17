@@ -1,0 +1,29 @@
+........................................................................ [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 31%]
+...........................F............................................ [ 41%]
+........................................................................ [ 52%]
+........................................................................ [ 62%]
+........................................................................ [ 73%]
+........................................................................ [ 83%]
+........................................................................ [ 94%]
+.......................................                                  [100%]
+=================================== FAILURES ===================================
+________ test_lateral_request_selects_reachable_view_with_real_parallax ________
+
+    def test_lateral_request_selects_reachable_view_with_real_parallax():
+        cell,pose,offset,intr,color,depth = scene(2,True)
+        views = inspect_frame(pose,offset,0.,intr,color,depth)
+        locked = {name:'0' for name in DISPLAY}
+        locked[cell.name] = None
+        action = plan_action(views,locked,pose,offset,0.,True,intr)
+>       assert action.kind == 'move'
+E       AssertionError: assert 'stuck' == 'move'
+E
+E         - move
+E         + stuck
+
+tests/test_far_white_parallax.py:128: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_far_white_parallax.py::test_lateral_request_selects_reachable_view_with_real_parallax
+1 failed, 686 passed in 207.90s (0:03:27)

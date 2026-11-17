@@ -149,6 +149,8 @@ def test_ssh_setup_finishes_before_starting_can_reader(monkeypatch):
     assert 'interactive=True' in remote[3]
     assert remote[4] == 'can0'
     assert reader[2]['stdout'] == subprocess.PIPE
+    assert reader[2]['stdin'] == subprocess.DEVNULL
+    assert '-n' in reader[1]
 
 
 def test_ssh_setup_failure_does_not_start_reader(monkeypatch):

@@ -109,12 +109,14 @@ class CanPoseStream:
             except subprocess.CalledProcessError as error:
                 raise RuntimeError('SSH CAN 初始化失败，请查看终端中的连接、密码或接口错误；'
                                    '修复后重新打开相机。') from error
-            command = ssh + [host,
+            command = ssh + ['-n', host,
                        'python3 -u -c ' + shlex.quote(READER) + ' ' + shlex.quote(interface)]
         else:
             command = [sys.executable, '-u', '-c', READER, interface]
         # SSH 密码由终端提示输入，不保存进源码或命令参数。
-        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, bufsize=1)
+        # 后台读取只接收数据，禁止继承界面终端输入，避免SSH抢走操作按键。
+        self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, text=True, bufsize=1)
         self.samples = deque(maxlen=100)
         self.lock = threading.Lock()
         self.thread = threading.Thread(target=self._read, daemon=True)

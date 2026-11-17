@@ -158,14 +158,16 @@ def test_missing_pose_and_blocked_path_do_not_suggest_return_to_start():
     assert '已确认：无' in text
 
 
-def test_real_tty_accepts_single_key_without_enter_and_restores_terminal():
+@pytest.mark.parametrize('headless', [True, False])
+def test_real_tty_accepts_single_key_without_enter_and_restores_terminal(headless):
     import pty
     import termios
     master,slave=pty.openpty()
     try:
         with os.fdopen(slave) as stream:
             before=termios.tcgetattr(stream.fileno())
-            ui=LiveUI(None,True,stream)
+            backend=SimpleNamespace(waitKey=lambda delay:-1)
+            ui=LiveUI(backend,headless,stream)
             ui.start_input()
             os.write(master,b'b')
             assert ui.waitKey(100)==ord('b')
@@ -175,3 +177,66 @@ def test_real_tty_accepts_single_key_without_enter_and_restores_terminal():
             assert termios.tcgetattr(stream.fileno())==before
     finally:
         os.close(master)
+
+
+def test_graphical_key_works_with_terminal_input_enabled():
+    import pty
+    master,slave=pty.openpty()
+    try:
+        with os.fdopen(slave) as stream:
+            ui=LiveUI(SimpleNamespace(waitKey=lambda delay:ord('c')),False,stream)
+            ui.start_input()
+            try:
+                assert ui.waitKey(1)==ord('c')
+            finally:
+                ui.close_input()
+    finally:
+        os.close(master)
+
+
+@pytest.mark.parametrize('headless', [True, False])
+def test_ssh_controlling_terminal_with_redirected_stdin(headless):
+    """独立会话模拟SSH的PTY，stdin重定向时仍从控制终端读取。"""
+    import pty
+    import select
+    import signal
+    pid, master = pty.fork()
+    if pid == 0:
+        try:
+            import sys
+            sys.stdin = open(os.devnull)
+            ui = LiveUI(SimpleNamespace(waitKey=lambda delay:255),headless)
+            ui.start_input()
+            assert ui.saved_terminal is not None
+            os.write(1,b'INPUT_READY\n')
+            received=[]
+            import time
+            deadline=time.monotonic()+5
+            while len(received)<7 and time.monotonic()<deadline:
+                key=ui.waitKey(10)
+                if key != -1:
+                    received.append(chr(key))
+            ui.close_input()
+            os._exit(0 if ''.join(received)=='bd12345' else 2)
+        except BaseException:
+            os._exit(3)
+    try:
+        assert select.select([master],[],[],5)[0], '终端初始化超时'
+        assert b'INPUT_READY' in os.read(master,4096)
+        os.write(master,b'bd12345')
+        import time
+        deadline=time.monotonic()+7
+        while time.monotonic()<deadline:
+            done,status=os.waitpid(pid,os.WNOHANG)
+            if done:
+                assert os.waitstatus_to_exitcode(status)==0
+                pid=None
+                break
+            time.sleep(.01)
+        else:
+            pytest.fail('SSH按键接收超时')
+    finally:
+        os.close(master)
+        if pid is not None:
+            os.kill(pid,signal.SIGKILL)
+            os.waitpid(pid,0)

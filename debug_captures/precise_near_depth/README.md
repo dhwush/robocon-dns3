@@ -23,3 +23,5 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q t
 ```
 
 针对性95项通过；新增规则13项通过。最终全量结果见`tests_final.txt`，`tests_full.txt`为最终RGB补高优先级调整之前的中间检查。
+
+最终全量：664通过、1个既有失败（`test_lateral_request_selects_reachable_view_with_real_parallax`，侧向换位动作stuck而非move）。本次无新增失败。

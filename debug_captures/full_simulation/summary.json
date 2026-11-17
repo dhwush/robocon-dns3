@@ -1,0 +1,80 @@
+{
+  "complete": false,
+  "truth": [
+    "1",
+    "2",
+    "红",
+    "蓝",
+    "0",
+    "1"
+  ],
+  "results": [
+    "1",
+    "2",
+    null,
+    "蓝",
+    "0",
+    null
+  ],
+  "matching": false,
+  "simulated_seconds": 180.0,
+  "snapshots": 20,
+  "metrics": {
+    "observation_unit": "settled_pose",
+    "distance_m": 6.691,
+    "observation_count": 4,
+    "observations": [
+      {
+        "cell": "第三行左侧",
+        "cells": [
+          "第三行左侧"
+        ],
+        "attempt": 0,
+        "x": 0.2,
+        "y": 0.0,
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "elapsed_s": 0.8000000000001819
+      },
+      {
+        "cell": "最近左侧地面",
+        "cells": [
+          "最近左侧地面",
+          "最近一行左侧"
+        ],
+        "attempt": 0,
+        "x": -0.19498400705340657,
+        "y": -0.08073768247751786,
+        "yaw_deg": 35.74018147871253,
+        "pitch_deg": 0.0,
+        "elapsed_s": 3.2000000000007276
+      },
+      {
+        "cell": "最近一行右侧",
+        "cells": [
+          "最近一行右侧",
+          "最近右侧地面"
+        ],
+        "attempt": 0,
+        "x": 1.9272414535205142,
+        "y": 3.4474187047586486,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0,
+        "elapsed_s": 8.000000000001819
+      },
+      {
+        "cell": "最近右侧地面",
+        "cells": [
+          "最近右侧地面"
+        ],
+        "attempt": 0,
+        "x": 1.9272414535205142,
+        "y": 3.7474187047586485,
+        "yaw_deg": 173.28617305048948,
+        "pitch_deg": 0.0,
+        "elapsed_s": 11.200000000002547
+      }
+    ],
+    "manual_confirmed": []
+  }
+}
