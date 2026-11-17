@@ -101,6 +101,13 @@ class RadarPoseStream:
             matched = closest_pose(list(self.samples), stamp, max_delta=.15)
             return matched if matched is not None and -.05 <= time.time()-matched.stamp <= .6 else None
 
+    def measurements_between(self, start, end):
+        """最新定位仍有效时，读取原始测量历史供相机停稳判断。"""
+        with self.lock:
+            if not self.healthy or not self.samples or not -.05 <= time.time()-self.samples[-1].stamp <= .6:
+                return ()
+            return tuple(p for p in self.samples if start <= p.stamp <= end)
+
     def match_frame(self, stamp, timeout=.12):
         # 5Hz位姿的下一次测量可能稍后到达；短暂等待再判断，避免每周期误报断流。
         deadline = time.monotonic() + timeout

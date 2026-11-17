@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.parametrize('source', ['static', 'radar', 'ros', 'laptop', 'host'])
 @pytest.mark.parametrize('headless', [False, True])
-def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source, headless):
+def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, tmp_path, source, headless, capsys):
     import cv2
     import view_field as vf
     from car_pose import CarPose, Setup, load_intrinsics
@@ -77,6 +77,12 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
     assert isinstance(frames,dict) and frames['color'] is color
     assert args.autonomous_map_lines[2].startswith('待测塔：')
     assert stopped == [True]
+    if headless:
+        printed=capsys.readouterr().out
+        assert '当前实时：' in printed
+        assert '立即要求：' in printed
+        assert printed.count('最终汇总：') == 1
+        assert '本帧=' not in printed
 
 
 def test_delayed_radar_uses_historical_color_depth_and_gravity(monkeypatch):
@@ -135,8 +141,8 @@ def test_b_confirms_synchronized_current_pose_and_measured_pitch(monkeypatch, tm
     views = {n:CellView(None,False,True,False,False,0.,0.,0.,255.) for n in DISPLAY}
     monkeypatch.setattr('report.inspect_frame',lambda *a,**k:views)
     watch = FieldWatch(Setup(True,np.zeros(2),33.,'', 'rad',False),intr)
-    initial = CarPose(-4.,.6,-.4)
-    pressed = CarPose(-3.8,.8,1.2)
+    initial = CarPose(-2.4,.1,-.4)
+    pressed = CarPose(-2.3,.2,1.2)
     poses = iter([initial,pressed,pressed])
     stream = SimpleNamespace(match=lambda stamp=None:next(poses),error='',close=lambda:None)
     keys = iter([-1,ord('b'),ord('q')])

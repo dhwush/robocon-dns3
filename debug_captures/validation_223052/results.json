@@ -1,0 +1,898 @@
+{
+  "baseline": "febe31d",
+  "depth": false,
+  "roll": 0,
+  "pitch": -2,
+  "records": [
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        790,
+        441,
+        66,
+        45
+      ]
+    },
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        337,
+        107,
+        27
+      ]
+    },
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        790,
+        442,
+        66,
+        43
+      ]
+    },
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        298,
+        344,
+        60,
+        24
+      ]
+    },
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        790,
+        436,
+        111,
+        48
+      ]
+    },
+    {
+      "second": 134,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        298,
+        344,
+        60,
+        26
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        780,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        337,
+        107,
+        27
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        780,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        298,
+        344,
+        60,
+        24
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        780,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 134,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        298,
+        344,
+        60,
+        26
+      ]
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        73,
+        84
+      ]
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": null,
+      "method": null,
+      "reason": "白盒与背景未分离：缺少深度，需要侧向视角；被高台遮挡：一层可见高度不足8厘米",
+      "box": null
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        73,
+        84
+      ]
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        289,
+        418,
+        82,
+        28
+      ]
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        73,
+        84
+      ]
+    },
+    {
+      "second": 136,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        368,
+        419,
+        89,
+        37
+      ]
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": null,
+      "method": null,
+      "reason": "白盒与背景未分离：缺少深度，需要侧向视角；被高台遮挡：一层可见高度不足8厘米",
+      "box": null
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        289,
+        418,
+        82,
+        28
+      ]
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 136,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        368,
+        419,
+        89,
+        37
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        70,
+        84
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        344,
+        104,
+        24
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        70,
+        84
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        344,
+        104,
+        24
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        441,
+        70,
+        84
+      ]
+    },
+    {
+      "second": 137,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        343,
+        101,
+        28
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        78,
+        61
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        344,
+        104,
+        24
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        78,
+        61
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        301,
+        344,
+        104,
+        24
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        78,
+        61
+      ]
+    },
+    {
+      "second": 137,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        343,
+        101,
+        28
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        793,
+        442,
+        66,
+        42
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        24
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        793,
+        441,
+        84,
+        35
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        24
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        793,
+        441,
+        84,
+        35
+      ]
+    },
+    {
+      "second": 138,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        25
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        24
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        24
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        80,
+        61
+      ]
+    },
+    {
+      "second": 138,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        299,
+        344,
+        64,
+        25
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        440,
+        72,
+        85
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        344,
+        101,
+        24
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        440,
+        72,
+        85
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        344,
+        101,
+        24
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "1",
+      "method": "RGB盒体边界",
+      "reason": null,
+      "box": [
+        789,
+        440,
+        72,
+        85
+      ]
+    },
+    {
+      "second": 145,
+      "version": "BEFORE",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        343,
+        101,
+        28
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": -0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        79,
+        61
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": -0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        344,
+        101,
+        24
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        79,
+        61
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        344,
+        101,
+        24
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 5,
+      "pitch_delta": 0.5,
+      "result": "红",
+      "method": "RGB顶块",
+      "reason": null,
+      "box": [
+        783,
+        275,
+        79,
+        61
+      ]
+    },
+    {
+      "second": 145,
+      "version": "AFTER",
+      "no": 6,
+      "pitch_delta": 0.5,
+      "result": "2",
+      "method": "RGB局部盒面",
+      "reason": null,
+      "box": [
+        304,
+        343,
+        101,
+        28
+      ]
+    }
+  ]
+}

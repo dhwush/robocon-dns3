@@ -11,7 +11,7 @@ from car_pose import (CarPose, camera_position, observation_moved, turned_pose, 
 from field_map import DISPLAY, TOWER_NO, tower_cells
 from motion import (Action, MAX_TRIES, GOAL_BEARING, PITCH_OFFSET, heading_words, format_pitch, _aim_cell, _looks,
                     fits_when_aimed, fits_rgb_when_aimed, nearest_observation, _sees,
-                    YAW_TOL_DEG, PITCH_TOL_DEG, MOVE_ARRIVE_M, _travel, _bypass_points, _move_toward, survey as supplementary_route, _observation_preferences, _parking_clear)
+                    YAW_TOL_DEG, PITCH_TOL_DEG, MOVE_ARRIVE_M, _travel, _bypass_points, _move_toward, survey as supplementary_route, _observation_preferences, _parking_clear, _right_front_turn_clear)
 
 WINDOW_SECONDS = 2.0
 CONFIRM_WINDOWS = 3
@@ -136,6 +136,10 @@ class AutonomousSurvey:
         watch.last_pose, watch.pitch = pose, float(pitch)
         watch.votes = {name: Vote() for name in DISPLAY}
         watch.stable_frames = 0
+        watch.stability_after_stamp = pose.stamp
+        if hasattr(watch,'camera_stability'):
+            watch.camera_stability.reset()
+            watch.camera_settled = False
         for attr in ('local_rgb_tracks', 'parallax_origins'):
             if hasattr(watch, attr):
                 getattr(watch, attr).clear()
@@ -145,12 +149,16 @@ class AutonomousSurvey:
                         f'yaw={math.degrees(pose.yaw):+.1f}° 俯仰={pitch:+.1f}°；停稳后开始观测规划')
         return True
 
+    def _camera_ready(self):
+        return (self.watch.stable_frames >= OBS_STABLE_FRAMES
+                and getattr(self.watch,'camera_settled',True))
+
     def confirmation_target(self):
         action = self.action
         if action is None or action.kind != 'wait' or action.cell in self.manual_confirmed:
             return None
         view = self.watch.views[action.cell]
-        if not self.watch.have_color or self.watch.stable_frames < OBS_STABLE_FRAMES or not view.in_view:
+        if not self.watch.have_color or not self._camera_ready() or not view.in_view:
             return None
         # 只确认画面当前显示的结论，不把旧锁定值当成本帧结果。
         if view.conclusion is None or view.skip_vote or view.needs_yaw or view.needs_pitch:
@@ -288,7 +296,7 @@ class AutonomousSurvey:
     def _note_observation(self, names, now, attempt=0):
         """同一停稳位置、yaw与俯仰只计一次，多塔共享该次观测。"""
         watch = self.watch
-        if not watch.have_color or watch.stable_frames < OBS_STABLE_FRAMES:
+        if not watch.have_color or not self._camera_ready():
             return
         pose = watch.last_pose
         previous = self.observations[-1] if self.observations else None
@@ -316,6 +324,10 @@ class AutonomousSurvey:
             return False
         pose = watch.last_pose
         target = CarPose(goal.observation_x, goal.observation_y, goal.observation_yaw)
+        if not _parking_clear(target.x,target.y,target.yaw):
+            self.observation_goal = None
+            self.action = Action('blocked','原观察点不满足当前边界，取消该点并保留未识别目标')
+            return True
         move_target = turned_pose(target, pose.yaw)
         if math.dist(body_center(pose), body_center(target)) > MOVE_ARRIVE_M:
             trip = _travel(pose.x, pose.y, move_target.x, move_target.y, _bypass_points(pose.yaw), pose.yaw)
@@ -325,6 +337,10 @@ class AutonomousSurvey:
                 return True
             self.action = _move_toward(pose, move_target.x, move_target.y, trip[1], 'joint', names)
         elif abs((math.degrees(target.yaw-pose.yaw)+180)%360-180) > YAW_TOL_DEG:
+            if not _right_front_turn_clear(pose,target.yaw):
+                self.observation_goal = None
+                self.action = Action('blocked','转向过程中右前点会越过左右边界，保留未识别目标')
+                return True
             self.action = Action('yaw', '转到联合观测朝向', yaw=target.yaw,
                                  pitch=goal.observation_pitch, cell=names[0], cells=names)
         elif abs(goal.observation_pitch-watch.pitch) > PITCH_TOL_DEG:
@@ -354,7 +370,7 @@ class AutonomousSurvey:
             words = {'move': '本段移动到位', 'yaw': '完成旋转', 'pitch': '俯仰到位'}
             self.stop_message = words[action.kind] + '，可以了，停止！保持车身和相机不动，等待稳定'
             self.stop_until = now + STOP_HOLD_SECONDS
-        if now < self.stop_until or self.watch.stable_frames < OBS_STABLE_FRAMES:
+        if now < self.stop_until or not self._camera_ready():
             for evidence in self.evidence.values():
                 evidence.clear()
             self.message = self.stop_message
@@ -374,6 +390,13 @@ class AutonomousSurvey:
             return
         watch = self.watch
         now = self.clock()
+        if self.confirmed_start and self.primary_stops is None:
+            # 先生成路线预览；相机停稳只限制识别确认，不阻止规划。
+            self.primary_stops,self.primary_line = supplementary_route(
+                self.initial_pose,watch.setup.center_to_corner,watch.intr,self.initial_pitch,
+                max_stops=3,planner=nearest_observation)
+        if not self.stationary_scan and not self._camera_ready():
+            self.look_key = self.look_started = None
         pose = watch.last_pose
         if self.initial_pose is None:
             self.initial_pose = pose
@@ -396,7 +419,7 @@ class AutonomousSurvey:
             self.station_pose = pose
             self._freeze_headings(pose)
         if self.action is not None and self.action.kind == 'move':
-            if not watch._arrived(self.action) or watch.stable_frames < OBS_STABLE_FRAMES:
+            if not watch._arrived(self.action) or not self._camera_ready():
                 for evidence in self.evidence.values():
                     evidence.clear()
                 self.message = '执行换点指令，到位稳定后重新扫描'
@@ -404,7 +427,7 @@ class AutonomousSurvey:
             self._reset_station(pose)
         distance = math.hypot(pose.x-self.station_pose.x, pose.y-self.station_pose.y)
         if distance > STATION_RESET_M:
-            if watch.stable_frames < OBS_STABLE_FRAMES:
+            if not self._camera_ready():
                 for evidence in self.evidence.values():
                     evidence.clear()
                 self.message = '位置变化超过10厘米，停稳后重新扫描'
@@ -417,12 +440,13 @@ class AutonomousSurvey:
             self.anchor, self.anchor_pitch, self.anchor_roll = pose, watch.pitch, watch.roll
             for evidence in self.evidence.values():
                 evidence.clear()
-        if not watch.have_color or watch.stable_frames < OBS_STABLE_FRAMES:
+        if not watch.have_color or not self._camera_ready():
             for evidence in self.evidence.values():
                 evidence.clear()
-            self.message = "等待相机稳定"
-            # 暂停证据采样，但同一观察档的失败时限仍然有效。
-            if self._expire_look(now):
+            self.message = "等待相机停稳：连续0.6秒、至少3次有效采样；位置变化≤1厘米，朝向/俯仰/横滚变化≤1°"
+            if not self.stationary_scan:
+                self.look_key = self.look_started = None
+            elif self._expire_look(now):
                 self._schedule(now)
             return
         if self.observation_goal is not None:
@@ -755,6 +779,9 @@ class AutonomousSurvey:
     def snapshot(self):
         return dict(coordinates="场地原点，右前角x/y单位米；action.yaw为弧度，history.yaw_deg为角度；正yaw向左，正pitch抬头",
                     awaiting_start=self.awaiting_start,
+                    camera_stability=(self.watch.camera_stability.summary()
+                                      if hasattr(self.watch,"camera_stability") else None),
+                    camera_ready=self._camera_ready(),
                     initial_pose=asdict(self.initial_pose) if self.initial_pose is not None else None,
                     initial_pitch=self.initial_pitch if self.confirmed_start else None,
                     next_action=asdict(self.action) if self.action is not None else None,

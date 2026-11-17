@@ -273,9 +273,45 @@ def _cap_world_support(part, colored, depth, x, y, pose, offset, pitch, intr, ro
     return world,middle
 
 
+def _cap_pair_masks(color):
+    """只清理红蓝配对周围的小碎片；保留相当大小的多块以便冲突检查。"""
+    red, blue = _cap_colors(color)
+    red, blue = red.copy(), blue.copy()
+    closed = cv2.morphologyEx((red | blue).astype(np.uint8), cv2.MORPH_CLOSE,
+                             np.ones((7, 7), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(closed, 8)
+    for index in range(1, count):
+        x, y, w, h, pixels = map(int, stats[index])
+        if pixels < 16:
+            continue
+        part = labels[y:y+h, x:x+w] == index
+        cores = []
+        for ink in (red, blue):
+            local = ink[y:y+h, x:x+w] & part
+            n, groups, sizes, _ = cv2.connectedComponentsWithStats(local.astype(np.uint8), 8)
+            if n < 2:
+                break
+            largest = 1 + int(np.argmax(sizes[1:, cv2.CC_STAT_AREA]))
+            area = int(sizes[largest, cv2.CC_STAT_AREA])
+            others = np.delete(sizes[1:, cv2.CC_STAT_AREA], largest-1)
+            # 单色核心须自身成块，且不能吞掉第二块可能的真实顶块。
+            if (area < 8 or area < .8 * int(local.sum())
+                    or (len(others) and int(others.max()) > .1 * area)
+                    or area < .35 * int(sizes[largest, 2]) * int(sizes[largest, 3])
+                    or min(sizes[largest, 2:4]) < 3):
+                break
+            cores.append(groups == largest)
+        if len(cores) != 2:
+            continue
+        for ink, core in zip((red, blue), cores):
+            roi = ink[y:y+h, x:x+w]
+            roi[part & ~core] = False
+    return red, blue
+
+
 def _assign_caps(cells, color, pose, offset, pitch, intr, roll=0., depth=None):
     """整帧顶块唯一归属：成片实测深度优先，缺测时用RGB塔顶投影。"""
-    red, blue = _cap_colors(color)
+    red, blue = _cap_pair_masks(color)
     colored=red | blue
     # 统一闭合半径，确保各塔使用同一颜色块身份。
     closed = cv2.morphologyEx(colored.astype(np.uint8), cv2.MORPH_CLOSE,
@@ -1383,7 +1419,7 @@ def _cap_width_limit(cell, pose, offset, pitch, intr, z_cam, roll=0.0):
 def _rgb_cap_reading(cell, color, mask, pose, offset, pitch, intr, z_cam,
                      roll=0.0, diagnostic=None):
     """顶块独立提供阵营证据；白盒遮挡、粘连和缺失深度不否定它。"""
-    red,blue=_cap_colors(color)
+    red,blue=_cap_pair_masks(color)
     allowed=(diagnostic or {}).get('_cap_allowed')
     suspected_allowed=(diagnostic or {}).get('_cap_suspected_allowed')
     width_limit = _cap_width_limit(cell,pose,offset,pitch,intr,z_cam,roll)
@@ -2244,6 +2280,29 @@ def _merge_white_top_lines(lines,z_cam,intr,roll=0.):
     return np.unique(np.asarray([*original,*merged],np.int32).reshape(-1,4),axis=0)
 
 
+def _top_depth_support(values, own, xs, columns, info):
+    """分离远背景回波；有宽度支撑的本塔面才能排除背景，前景仍是反证。"""
+    raw = float(np.mean(own))
+    info.update(depth_points=len(values), own_depth_points=int(own.sum()),
+                depth_support_raw=raw, depth_background_points=0)
+    if raw >= .7:
+        info['depth_support'] = raw
+        return True
+    coverage = len(np.unique(xs[own])) / max(1, len(np.unique(columns)))
+    info['depth_column_coverage'] = float(coverage)
+    if own.sum() < 30 or coverage < .7:
+        info.update(depth_support=raw, depth_rejection='本塔深度点数或横向支撑不足')
+        return False
+    surface_far = float(np.percentile(values[own], 95))
+    background = values > surface_far + max(.12, .03 * surface_far)
+    support = float(own.sum() / max(1, np.count_nonzero(~background)))
+    info.update(depth_support=support, depth_background_points=int(background.sum()))
+    if support < .7:
+        info['depth_rejection'] = '候选盒面深度归属不足，仍有前景或邻面'
+        return False
+    return True
+
+
 def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,diagnostic=None,depth=None):
     """从真实顶边和局部盒面生成候选，不要求可见盒底或独立白色连通块。"""
     info={'checks':[]}
@@ -2479,6 +2538,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
     for index,(state,piece,z,relative,check,cols,face_rows,below) in enumerate(pending):
         if index in removed:
             check['seam_rejected']=True
+            check['rejection']='接缝不是顶边'
             continue
         if index in confirmed_high:
             state='2'
@@ -2503,14 +2563,15 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                 bx0,bx1,by0,by1=cell.search_bounds(MARGIN_M)
                 own=((world[:,0]>=bx0)&(world[:,0]<=bx1)&(world[:,1]>=by0)&(world[:,1]<=by1)
                      &(world[:,2]<=level+.08)&(world[:,2]>=level-.22))
-                check['depth_support']=float(np.mean(own))
-                if np.mean(own)<.7:
+                if not _top_depth_support(values,own,xx,cols,check):
                     continue
             elif z_cam<=_DEPTH_FAR_M:
+                check['rejection']='近处候选盒面有效深度不足12点'
                 continue
             # 提供了深度时，缺失的上层不能被RGB色差伪装为空域。
             if not _rgb_upper_consistent(cell,level,pose,offset,pitch,intr,depth,roll,
                                       check.setdefault('upper_space',{})):
+                check['rejection']='上方空间存在实测占用'
                 continue
             if check['upper_space'].get('state')=='unknown':
                 top_values=depth[face_rows[:,None]+np.arange(1,5)[None,:],cols[:,None]]
@@ -2518,6 +2579,7 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                 body_measured=((mask>0)&np.isfinite(depth)&(depth>z_cam-.5)&(depth<z_cam+.5))
                 if np.count_nonzero(measured_top)<5 and np.any(body_measured):
                     check['depth_state']='body_only_without_top_or_upper'
+                    check['rejection']='盒身有深度但顶边和上方均未证实'
                     continue
         # 同层候选比较真实盒面支撑，不再只挑反投影最高的一小段。
         # 层高偏差作软评分；层数仍先由几何、相对盒高及接缝核验决定。

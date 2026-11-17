@@ -181,8 +181,14 @@ def live_panels(watch, pose, source, extras=()):
                  '有效识别即记住，仅未知时继续换视角']
     elif action is not None and action.kind == 'move':
         left.append(f"下一点：x={action.x:+.2f}m y={action.y:+.2f}m")
+    elif action is not None and action.kind == 'blocked':
+        left.append('当前点：暂无安全有效观察点')
     else:
-        left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
+        if survey is not None and getattr(survey,'confirmed_start',False) and not survey.complete:
+            count = len(survey.primary_stops or [])
+            left.append(f'起点已确认，初始路线{count}个点；当前点等待停稳识别' if count else '起点已确认，正在生成初始路线')
+        else:
+            left.append('当前点：等待观察任务' if survey is None or not survey.complete else '当前点：测量完成')
     route_hint = []
     if survey is not None:
         metrics = survey.metrics()
@@ -361,7 +367,7 @@ def _open_camera(rs):
     scale = {"v": 0.001}
     accel = {"rotation": None, "gravity": None}
     pending: dict = {"color": None, "depth": None, "gravity": None, "stamp": 0.0, "received": 0.0,
-                     "history": deque(maxlen=24)}
+                     "history": deque(maxlen=24), "stability_history": deque(maxlen=120)}
 
     def on_frame(frame) -> None:
         try:
@@ -398,6 +404,7 @@ def _open_camera(rs):
                 pending["stamp"] = stamp
                 pending["received"] = time.monotonic()
                 pending["history"].append((color, depth, gravity, stamp, pending["received"]))
+                pending["stability_history"].append((None,None,gravity,stamp,pending["received"]))
             ready.set()
         except Exception:
             return
@@ -444,6 +451,23 @@ def matched_camera_frame(history, stream, after_stamp):
     return None if matched is None else (frame, matched)
 
 
+def camera_stability_samples(history, stream, current, image_stamp):
+    """使用原始采样时间配对历史数据，停稳判断不受识别处理耗时影响。"""
+    if not history or not hasattr(stream,'measurements_between'):
+        return None
+    frames = [f for f in history if np.isfinite(f[3]) and image_stamp-1. <= f[3] <= image_stamp+1e-6]
+    if not frames:
+        return []
+    samples = []
+    for pose in stream.measurements_between(min(f[3] for f in frames),current.stamp):
+        frame = min(frames,key=lambda f:abs(f[3]-pose.stamp))
+        if abs(frame[3]-pose.stamp) > .15:
+            continue
+        pitch,roll = pitch_from_gravity(frame[2]),roll_from_gravity(frame[2])
+        samples.append((pose,pitch,roll,pose.stamp))
+    return samples
+
+
 def prepare_start_confirmation(watch, source):
     """两种设备模式共用按键确认流程；手动/旧雷达模式保持原行为。"""
     if source in ('laptop', 'host') and hasattr(watch.autonomy, 'wait_for_start'):
@@ -452,12 +476,13 @@ def prepare_start_confirmation(watch, source):
 
 def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     import cv2
-    from terminal_ui import LiveUI, terminal_results
+    from terminal_ui import LiveUI, TerminalDashboard
     headless = getattr(args, "headless", False)
     ui = LiveUI(cv2, headless)
+    dashboard = TerminalDashboard() if headless else None
     if headless:
         print("SSH终端模式：相机和雷达由运行本程序的主机读取。", flush=True)
-        print("输入单个命令并回车：b 开始，c 确认，1-5 光线，d 诊断，n 切塔，s 保存，q 退出。", flush=True)
+        print("终端直接按键操作：b 开始，c 确认，1-5 光线，d 诊断，n 切塔，s 保存，q 退出。", flush=True)
 
     try:
         import pyrealsense2 as rs
@@ -524,6 +549,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     debug_selected = 0
     from tower_debug import paint_diagnostics, save_capture
     try:
+        ui.start_input()
         _apply_light(sensor, rs, light)
         while True:
             if not ready.wait(0.05):
@@ -539,6 +565,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 stamp = float(camera_frames["stamp"])
                 received = float(camera_frames["received"])
                 history = list(camera_frames.get("history", ()))
+                stability_history = list(camera_frames.get("stability_history", history))
             if color is None or depth is None:
                 continue
             current = pose
@@ -568,7 +595,9 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     args.autonomous_route = {}
                     if debug_visible:
                         ui.imshow("颜色与深度诊断", color)
-                    if previous != message:
+                    if dashboard is not None:
+                        dashboard.show(watch,None,None,notice=message)
+                    elif previous != message:
                         print(message, flush=True)
                         previous = message
                     if ui.waitKey(1) & 0xFF in (ord("q"), 27):
@@ -583,6 +612,9 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             last_processed_stamp = stamp
             measured = pitch_from_gravity(gravity)
             rolled = roll_from_gravity(gravity)
+            watch.pitch_measurement_valid = (measured is not None and rolled is not None
+                                             and np.isfinite(measured) and np.isfinite(rolled))
+            watch.stability_samples = camera_stability_samples(stability_history,radar_stream,current,stamp)
             watch.follow_pitch(measured)
             if rolled is not None:
                 watch.roll = rolled
@@ -614,7 +646,10 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     try:
                         watch.autonomy.save(args.survey_report)
                     except OSError as error:
-                        print(f"保存自主识别记录失败：{error}")
+                        if dashboard is not None:
+                            dashboard.notice=f"保存自主识别记录失败：{error}"
+                        else:
+                            print(f"保存自主识别记录失败：{error}")
                     report_saved_at = time.monotonic()
             fixed_targets = getattr(args, "fixed_target_lines", [])
             result_mode = args.mode
@@ -622,10 +657,17 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             shown = watch.window_lines(result_mode)
             if source in ("radar", "ros", "laptop", "host"):
                 shown = [radar_pose_text(current)] + shown
-            if headless:
-                shown += terminal_results(watch)
             text = "\n".join(shown)
-            if text != previous:
+            if dashboard is not None:
+                # 识别画面可能较旧；面板优先读取此刻有效的雷达与IMU反馈。
+                live_pose = radar_stream.match() if hasattr(radar_stream,'measurements_between') else current
+                with lock:
+                    live_gravity = camera_frames.get("gravity")
+                    live_pitch = pitch_from_gravity(live_gravity)
+                if dashboard.notice.startswith('雷达等待有效位姿'):
+                    dashboard.notice=''
+                dashboard.show(watch,live_pose,live_pitch)
+            elif text != previous:
                 print(text, flush=True)
                 previous = text
             locked = {name: vote.locked for name, vote in watch.votes.items()}
@@ -665,24 +707,33 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     args.autonomous_route = watch.autonomy.route_display()
                     args.autonomous_map_lines = [watch.autonomy.message]
                     watch.autonomy.save(args.survey_report)
+                if dashboard is not None:
+                    dashboard.show(watch,current,measured,notice=watch.autonomy.message)
                 continue
             target = confirm_ui['clicked'] or (confirm_ui['target'] if key == ord('c') else None)
             confirm_ui['clicked'] = None
             if target is not None and watch.autonomy is not None:
                 if watch.autonomy.confirm_current(target):
                     watch.autonomy.save(args.survey_report)
+                    if dashboard is not None:
+                        dashboard.show(watch,current,measured,notice='已手动确认当前结果，下一步指令已更新')
+            elif dashboard is not None and key == ord('c'):
+                dashboard.show(watch,current,measured,notice='尚不可确认：请等待到位、停稳且出现有效识别结果')
             if headless and key == ord("d"):
                 from field_map import DISPLAY
                 name = DISPLAY[debug_selected % len(DISPLAY)]
                 view = (watch.views or {}).get(name)
-                print(f"{TOWER_NO[name]}号诊断：" + ("等待画面" if view is None else
-                      f"结果={view.conclusion} 方法={view.method} 原因={view.reason}"), flush=True)
+                message=f"{TOWER_NO[name]}号诊断：" + ("等待画面" if view is None else
+                         f"结果={view.conclusion} 方法={view.method} 原因={view.reason}")
+                dashboard.show(watch,current,measured,notice=message)
             elif key == ord("d"):
                 debug_visible = not debug_visible
                 if not debug_visible:
                     ui.destroyWindow("颜色与深度诊断")
             elif key == ord("n"):
                 debug_selected = (debug_selected + 1) % len(watch.votes)
+                if dashboard is not None:
+                    dashboard.show(watch,current,measured,notice=f'当前诊断选择：{debug_selected+1}号，按 d 查看')
             elif key == ord("s"):
                 try:
                     saved = save_capture(ROOT / "debug_captures", color, depth,
@@ -696,21 +747,33 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                         "center_to_corner": watch.setup.center_to_corner,
                         "light": light, "exposure_wait": exposure_wait,
                     })
-                    print(f"已保存诊断：{saved}.npz / .png")
+                    message=f"已保存诊断：{saved}.npz / .png"
+                    if dashboard is not None:
+                        dashboard.show(watch,current,measured,notice=message)
+                    else:
+                        print(message)
                 except (OSError, ValueError) as error:
-                    print(f"保存诊断失败：{error}")
+                    if dashboard is not None:
+                        dashboard.show(watch,current,measured,notice=f"保存诊断失败：{error}")
+                    else:
+                        print(f"保存诊断失败：{error}")
             picked = light_from_key(key)
             if picked is not None:
                 watch.choose_light(picked)
                 light = watch.light
                 _apply_light(sensor, rs, light)
                 exposure_wait = 5
+                if dashboard is not None:
+                    dashboard.show(watch,current,measured,notice=f'光线档位已切换，等待曝光稳定：{light}')
     finally:
         if watch.autonomy is not None:
             try:
                 watch.autonomy.save(args.survey_report)
             except OSError as error:
                 print(f"保存自主识别记录失败：{error}")
+        ui.close_input()
+        if dashboard is not None:
+            dashboard.finish(watch)
         pipeline.stop()
         if radar_stream is not None and radar_stream is not getattr(args, "radar_stream", None):
             radar_stream.close()
@@ -718,6 +781,9 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
 
 
 def suspend_for_radar(watch):
+    if hasattr(watch,"camera_stability"):
+        watch.camera_stability.reset()
+        watch.camera_settled = False
     for vote in watch.votes.values():
         vote.on_move()
     if watch.autonomy is not None:

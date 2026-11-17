@@ -212,8 +212,12 @@ def test_field_watch_records_first_stable_result_without_vote_delay(monkeypatch)
         clock.now += .05
         watch.update(fake.last_pose, color)
         assert watch.votes[name].locked is None
-    clock.now += .05
+    clock.now += .7
     watch.update(fake.last_pose, color)
+    assert watch.votes[name].locked is None  # 采样间断不能当作持续停稳。
+    for _ in range(4):
+        clock.now += .2
+        watch.update(fake.last_pose,color)
     assert watch.votes[name].locked == '1'
     assert len(watch.autonomy.history[name]) == 1
 
@@ -541,13 +545,15 @@ def test_unknown_far_white_remains_pending(monkeypatch):
     assert name in survey.snapshot()['pending']
 
 
-def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range():
+def test_far_cap_pixel_budget_enables_opportunity_without_changing_depth_range(monkeypatch):
     import motion
     from field_map import tower_cells
     cell = tower_cells()[0]
     offset = np.zeros(2)
     intr = load_intrinsics('config/intrinsics.yaml')
-    # 侧方合法走廊内验证远距离像素预算，避免落入原点后60cm禁行区。
+    # 隔离成像预算；实际行驶边界另有停车、路线和转向用例覆盖。
+    monkeypatch.setattr(motion,"_parking_clear",lambda *args:True)
+    monkeypatch.setattr(motion,"_right_front_turn_clear",lambda *args:True)
     pose = CarPose(cell.x-4.5,cell.y,-math.pi/2)
     assert not motion.fits_when_aimed(cell,pose,offset,intr)
     assert motion.fits_rgb_when_aimed(cell,pose,offset,intr)
@@ -991,7 +997,7 @@ def test_joint_search_selects_moving_rotated_tilted_pose_for_shared_coverage(mon
     from car_pose import turned_pose
     names = list(DISPLAY[:2])
     monkeypatch.setattr(motion, '_distances', lambda *args: [])
-    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,*args: abs(y) < 1e-8 and .09 < x < .21)
+    monkeypatch.setattr(motion, '_parking_clear', lambda x,y,yaw=0.: abs(yaw)>1e-8 or abs(y)<1e-8 and .09<x<.21)
     monkeypatch.setattr(motion, '_ground_blocked', lambda *args: False)
     monkeypatch.setattr(motion, '_bypass_points', lambda *args: [])
     monkeypatch.setattr(motion, '_travel', lambda x,y,a,b,*args: (math.hypot(a-x,b-y),[(x,y),(a,b)]))
@@ -1156,7 +1162,7 @@ def test_completed_initial_route_does_not_append_when_all_towers_recognized(monk
 
 
 @pytest.mark.parametrize('source', ['laptop','host'])
-@pytest.mark.parametrize('x,y,yaw,pitch', [(-4.,.8,.7,-18.), (4.,2.8,-2.1,23.), (0.,0.,1.8,7.)])
+@pytest.mark.parametrize('x,y,yaw,pitch', [(-2.3,.1,.7,-18.), (2.65,.2,-2.1,23.), (0.,0.,1.8,7.)])
 def test_confirmed_random_start_uses_actual_pose_and_pitch_for_initial_plan(monkeypatch, source, x,y,yaw,pitch):
     from motion import RouteStop, RouteStops, Look
     from view_field import prepare_start_confirmation
@@ -1206,4 +1212,74 @@ def test_start_confirmation_rejects_missing_pitch_pose_or_forbidden_position(mon
         assert survey.awaiting_start
         assert survey.initial_pose is None
         assert survey.primary_stops is None
-    assert survey.confirm_start(CarPose(-4.,.8,-1.),-12.)
+    assert survey.confirm_start(CarPose(-2.3,.2,-1.),-12.)
+
+
+def test_cached_goal_outside_confirmed_x_limits_is_cancelled(monkeypatch):
+    from field_map import right_front_x_limits
+    _,watch,clock,name = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    survey.observation_goal = Action('wait','',cells=(name,),
+        observation_x=right_front_x_limits()[1]+.01,observation_y=.2,
+        observation_yaw=0.,observation_pitch=0.)
+    assert survey._advance_observation()
+    assert survey.observation_goal is None
+    assert survey.action.kind == 'blocked'
+    assert watch.votes[name].locked is None
+
+
+def test_camera_must_settle_before_automatic_manual_confirmation_and_observation_count(monkeypatch):
+    _,watch,clock,name = make_survey(monkeypatch)
+    survey = AutonomousSurvey(watch,clock)
+    watch.camera_settled = False
+    watch.stable_frames = 100  # 帧数足够也不能绕过持续停稳条件。
+    survey.action = Action('wait','',cell=name,cells=(name,))
+    assert survey.confirmation_target() is None
+    assert not survey.confirm_current((name,'1'))
+    survey.update()
+    assert watch.votes[name].locked is None
+    assert not survey.observations
+    watch.camera_settled = True
+    survey.update()
+    assert watch.votes[name].locked == '1'
+    assert len(survey.observations) == 1
+    watch.camera_settled = False
+    survey.update()
+    assert watch.votes[name].locked == '1'  # 晃动不清除已确认结果。
+
+
+def test_unsettled_camera_resets_default_look_timeout_without_losing_target(monkeypatch):
+    _,watch,clock,name = make_survey(monkeypatch)
+    survey=AutonomousSurvey(watch,clock)
+    watch.camera_settled=False
+    goal=Action('wait','',cells=(name,),observation_x=0.,observation_y=0.,
+                observation_yaw=0.,observation_pitch=0.)
+    survey.observation_goal=goal
+    survey.look_key,survey.look_started=(name,0),clock()
+    clock.now=5.
+    survey.update()
+    assert survey.look_key is None and survey.look_started is None
+    assert survey.observation_goal is goal
+    assert not survey.failed_observations
+
+
+def test_b_start_plans_route_even_when_camera_not_settled(monkeypatch):
+    from motion import RouteStop,RouteStops,Look
+    _,watch,clock,name=make_survey(monkeypatch)
+    survey=AutonomousSurvey(watch,clock)
+    survey.wait_for_start()
+    assert survey.confirm_start(CarPose(0.,.2,.3),12.)
+    watch.camera_settled=False
+    calls=[]
+    def plan(pose,offset,intr,pitch,**kwargs):
+        calls.append((pose,pitch))
+        return RouteStops([RouteStop(pose.x,pose.y,()),
+                           RouteStop(.5,.2,(Look(autonomous.TOWER_NO[name],0.,0.),))]),[(pose.x,pose.y),(.5,.2)]
+    monkeypatch.setattr(autonomous,'supplementary_route',plan)
+    survey.update()
+    assert calls == [(survey.initial_pose,12.)]
+    assert len(survey.route_display()['points']) == 2
+    assert watch.votes[name].locked is None
+    assert not survey.observations
+    survey.update()
+    assert len(calls) == 1  # 等待停稳不能反复重算路线。

@@ -72,3 +72,106 @@ def test_laptop_launcher_runs_camera_and_radar_on_remote_host(monkeypatch,tmp_pa
     assert 'user@host' in result.stdout and '-tt' in result.stdout
     assert 'static --headless --pose-source host' in result.stdout
     assert 'project\\ with\\ spaces' in result.stdout
+
+
+def dashboard_watch():
+    from car_pose import CarPose
+    from motion import Action
+    votes={n:SimpleNamespace(locked=None,recheck=False) for n in DISPLAY}
+    goal=Action('wait','',cells=(DISPLAY[0],),observation_x=.5,observation_y=.4,
+                observation_yaw=.6,observation_pitch=12.)
+    survey=SimpleNamespace(action=Action('move','向右平移',x=.2,y=.1),observation_goal=goal,
+        awaiting_start=False,complete=False,initial_pose=CarPose(0,0,0),initial_pitch=4.,
+        stop_until=None,message='到达目标后观察',metrics=lambda:dict(observation_count=1,distance_m=.5))
+    return SimpleNamespace(autonomy=survey,votes=votes,pitch=4.,last_pose=CarPose(0,0,0))
+
+
+def test_panel_shows_current_pose_safe_waypoint_and_full_observation_goal():
+    from terminal_ui import terminal_status
+    from car_pose import CarPose
+    watch=dashboard_watch()
+    rows,_,_=terminal_status(watch,CarPose(.1,.15,.3),5.)
+    text='\n'.join(rows)
+    assert '当前实时：x=+0.100 m  y=+0.150 m  yaw=+17.2°  俯仰=+5.0°' in text
+    assert '立即要求：x=+0.200 m  y=+0.100 m' in text
+    assert '本次观测目标：x=+0.500 m  y=+0.400 m  yaw=+34.4°  俯仰=+12.0°' in text
+    assert '向右平移' in text
+    assert '本站观察：1号' in text
+
+
+def test_yaw_requirement_uses_rotated_right_front_corner():
+    from terminal_ui import terminal_status,_pose_text
+    from car_pose import CarPose,turned_pose
+    from motion import Action
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('yaw','',yaw=.8,pitch=12.)
+    current=CarPose(.1,.2,0.)
+    rows,_,_=terminal_status(watch,current,4.)
+    assert '立即要求：'+_pose_text(turned_pose(current,.8),12.) in rows
+
+
+def test_dashboard_refreshes_same_screen_then_identification_and_summary_once():
+    from terminal_ui import TerminalDashboard
+    from io import StringIO
+    watch=dashboard_watch()
+    output=StringIO()
+    panel=TerminalDashboard(output,interactive=True)
+    panel.show(watch,watch.last_pose,4.)
+    panel.show(watch,watch.last_pose,5.)
+    assert output.getvalue().count('\x1b[?1049h')==1
+    assert output.getvalue().count('\x1b[H\x1b[J')==2
+    watch.votes[DISPLAY[0]].locked='2'
+    panel.show(watch,watch.last_pose,5.)
+    assert '识别好了：1号=2；下一步请执行上方命令' in output.getvalue()
+    panel.finish(watch)
+    final=output.getvalue().split('\x1b[?1049l')[-1]
+    assert final.count('最终汇总')==1
+    assert '1号：2' in final and '6号：未确认' in final
+    assert '观测1次；累计路程0.500米' in final
+
+
+def test_redirected_status_does_not_repeat_when_only_feedback_coordinates_change():
+    from terminal_ui import TerminalDashboard
+    from car_pose import CarPose
+    from io import StringIO
+    output=StringIO()
+    panel=TerminalDashboard(output,interactive=False)
+    watch=dashboard_watch()
+    panel.show(watch,CarPose(0,0,0),4.)
+    before=output.getvalue()
+    panel.show(watch,CarPose(.1,.2,.3),5.)
+    assert output.getvalue()==before
+    watch.votes[DISPLAY[0]].locked='1'
+    panel.show(watch,CarPose(.1,.2,.3),5.)
+    assert '识别好了：1号=1' in output.getvalue()[len(before):]
+
+
+def test_missing_pose_and_blocked_path_do_not_suggest_return_to_start():
+    from terminal_ui import terminal_status
+    from motion import Action
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('blocked','无安全路径')
+    rows,_,_=terminal_status(watch,None,None)
+    text='\n'.join(rows)
+    assert '暂停移动和确认' in text
+    assert '立即要求：暂无移动要求' in text
+    assert '已确认：无' in text
+
+
+def test_real_tty_accepts_single_key_without_enter_and_restores_terminal():
+    import pty
+    import termios
+    master,slave=pty.openpty()
+    try:
+        with os.fdopen(slave) as stream:
+            before=termios.tcgetattr(stream.fileno())
+            ui=LiveUI(None,True,stream)
+            ui.start_input()
+            os.write(master,b'b')
+            assert ui.waitKey(100)==ord('b')
+            os.write(master,b'q')
+            assert ui.waitKey(100)==ord('q')
+            ui.close_input()
+            assert termios.tcgetattr(stream.fileno())==before
+    finally:
+        os.close(master)

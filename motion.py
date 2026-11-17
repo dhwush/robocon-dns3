@@ -18,7 +18,7 @@ import numpy as np
 
 from car_pose import BODY_HALF_M, turned_pose, CAMERA_HEIGHT_M, CarPose, Intrinsics, bearing_deg, camera_position, body_center, project
 from classify import MIN_VISIBLE_M, CellView, _pitch_target, _view_flags
-from field_map import TOWER_NO, all_cells, ground_towers, tower_cells, driving_exclusions
+from field_map import TOWER_NO, all_cells, ground_towers, tower_cells, driving_exclusions, right_front_x_limits
 from sight import visible_height, sees
 
 
@@ -170,7 +170,7 @@ def observation_poses(cell, pose: CarPose, offset: np.ndarray, intr: Intrinsics,
                 break
             faced = turned_pose(pose, faced.yaw-math.radians(error))
         pitch = _pitch_target(cell, faced, offset) + delta_pitch
-        if not _parking_clear(faced.x, faced.y, faced.yaw):
+        if not _parking_clear(faced.x, faced.y, faced.yaw) or not _right_front_turn_clear(pose,faced.yaw):
             continue
         if not _sees(cell, faced, offset, pitch, intr):
             continue
@@ -230,11 +230,17 @@ def _navigation_boxes(yaw: float = 0.0):
 
 
 def _parking_clear(x: float, y: float, yaw: float = 0.0) -> bool:
+    left, right = right_front_x_limits()
+    if not left-1e-9 <= x <= right+1e-9:
+        return False
     return not any(a <= x <= b and c <= y <= d
                    for a, b, c, d in _navigation_boxes(yaw))
 
 
 def _path_clear(x0: float, y0: float, x1: float, y1: float, yaw: float = 0.0) -> bool:
+    left, right = right_front_x_limits()
+    if not all(left-1e-9 <= x <= right+1e-9 for x in (x0,x1)):
+        return False
     # 精确线段/矩形相交，包含端点；不允许从碰撞状态盲目穿出。
     for a, b, c, d in _navigation_boxes(yaw):
         enter, leave = 0.0, 1.0
@@ -251,6 +257,20 @@ def _path_clear(x0: float, y0: float, x1: float, y1: float, yaw: float = 0.0) ->
             return False
     return True
 
+
+
+def _right_front_turn_clear(pose, yaw):
+    """检查最短转向弧上右前点的X极值，避免仅端点合法而中途越线。"""
+    left,right = right_front_x_limits()
+    center_x,_ = body_center(pose)
+    delta = math.atan2(math.sin(yaw-pose.yaw),math.cos(yaw-pose.yaw))
+    low,high = sorted((pose.yaw,pose.yaw+delta))
+    angles = [low,high]
+    first = math.ceil((low+math.pi/4)/math.pi)
+    last = math.floor((high+math.pi/4)/math.pi)
+    angles.extend(-math.pi/4+k*math.pi for k in range(first,last+1))
+    xs = [center_x+BODY_HALF_M*(math.cos(a)-math.sin(a)) for a in angles]
+    return min(xs) >= left-1e-9 and max(xs) <= right+1e-9
 
 
 def _vertical_span(cell, distance_h: float) -> float:
@@ -317,7 +337,8 @@ def _blocks() -> tuple[tuple[float, float, float, float], ...]:
 
 
 def _bypass_points(yaw: float = 0.0) -> list[tuple[float, float]]:
-    gap = 0.001
+    # 障碍已包含2 cm车身安全余量；折点仅加数值偏移，避免抹掉合法窄通道。
+    gap = 0.000001
     points = []
     for left, right, near, far in _navigation_boxes(yaw):
         for x, y in (
@@ -340,6 +361,8 @@ def _travel(
     yaw: float = 0.0,
 ) -> tuple[float, list[tuple[float, float]]] | None:
     # 直线能过就直走。过不去就从台子外角绕。返回总路程，以及从起点到终点的折线。
+    if not _parking_clear(x0,y0,yaw) or not _parking_clear(x1,y1,yaw):
+        return None
     if math.hypot(x1 - x0, y1 - y0) < 1e-6:
         return 0.0, [(x0, y0)]
     if _path_clear(x0, y0, x1, y1, yaw):
@@ -798,6 +821,8 @@ def survey(pose: CarPose, offset: np.ndarray, intr: Intrinsics, pitch=0.0, *,
             break
         target = CarPose(goal.observation_x, goal.observation_y, goal.observation_yaw)
         move_target = turned_pose(target, cursor.yaw)
+        if not _parking_clear(target.x,target.y,target.yaw) or not _right_front_turn_clear(move_target,target.yaw):
+            break
         trip = _travel(cursor.x, cursor.y, move_target.x, move_target.y,
                        _bypass_points(cursor.yaw), cursor.yaw)
         if trip is None:
@@ -832,7 +857,8 @@ def _order_supplementary_stops(stops, original_line, initial_pose=None):
         if key not in trips:
             start,goal = poses[a],poses[b]
             target = turned_pose(goal,start.yaw)
-            trips[key] = _travel(start.x,start.y,target.x,target.y,_bypass_points(start.yaw),start.yaw)
+            trips[key] = (_travel(start.x,start.y,target.x,target.y,_bypass_points(start.yaw),start.yaw)
+                          if _right_front_turn_clear(target,goal.yaw) else None)
         return trips[key]
     best = None
     for order in permutations(range(1,len(stops))):
@@ -1233,6 +1259,8 @@ def nearest_observation(pose, offset, intr, need, exhausted=None, references=Non
                 postures[(round(yaw,6),round(target_pitch,3))] = (middle,target_pitch)
         postures[(round(pose.yaw, 6), round(pitch, 3))] = (stood, pitch)
         for faced, target_pitch in postures.values():
+            if not _parking_clear(faced.x,faced.y,faced.yaw) or not _right_front_turn_clear(stood,faced.yaw):
+                continue
             covered = []
             origin = camera_position(faced, offset, 0.)
             for name, poses in profiles.items():

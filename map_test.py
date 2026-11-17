@@ -2,7 +2,8 @@
 
 python map_test.py
 
-默认读取雷达给出的右前角场地坐标和车头航向，按首次有效雷达位置规划路线。
+模式2、3读取实时右前角场地坐标和车头航向；回车打开相机，再按B确认实测姿态后规划。
+右前点X范围为1号区右边缘至6号区右边缘，路径及转向过程均不得越界。
 点击路线点只选择目标，不改变车位。回车打开相机，投影与动作计算使用雷达实测位姿。
 雷达未就绪、过期或与相机时间不匹配时暂停计算。两种设备入口都可用 --radar-url 指定服务。
 只有明确选择手动输入或加 --offline 时才使用地图手动点位。
@@ -21,7 +22,7 @@ import numpy as np
 
 from car_pose import OPTICAL_FROM_CORNER, CarPose, Setup, load_intrinsics, load_setup
 from field_map import (TOWER_NO, all_cells, tower_cells, ORIGIN_X, CELL_M,
-                       LEFT_CORRIDOR_MAX_Y, RIGHT_CORRIDOR_MAX_Y, DRIVING_MIN_Y)
+                       LEFT_CORRIDOR_MAX_Y, RIGHT_CORRIDOR_MAX_Y, DRIVING_MIN_Y, right_front_x_limits)
 from motion import heading_words, format_pitch, survey
 from report import FieldWatch
 from view_field import ROOT, _live, can_pose_text
@@ -403,6 +404,12 @@ def _draw_map(
     u1,v1 = _pixel(X_MAX,DRIVING_MIN_Y)
     draw.line((u0,v0,u1,v1),fill=(245,110,70),width=4)
     draw.text((u0+10,v0-24),"后方边界 Y=-0.600 m（原点后60厘米）",font=font,fill=(245,110,70))
+
+    for limit,label in zip(right_front_x_limits(),('1号区右边缘：右前点左界','6号区右边缘：右前点右界')):
+        u,v0 = _pixel(limit,Y_MAX)
+        _,v1 = _pixel(limit,Y_MIN)
+        draw.line((u,v0,u,v1),fill=(80,200,255),width=3)
+        draw.text((u+6,210),f"{label} X={limit:+.3f} m",font=font,fill=(80,200,255))
 
     for cell in all_cells():
         u, v = _pixel(cell.x, cell.y)

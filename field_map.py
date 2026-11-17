@@ -169,6 +169,12 @@ def tower_cells() -> tuple[Cell, ...]:
     return tuple(by_name[name] for name in DISPLAY)
 
 
+def right_front_x_limits() -> tuple[float, float]:
+    """右前定位点的左右界，分别对齐1号、6号建塔区右边缘（不作车身膨胀）。"""
+    cells = tower_cells()
+    return cells[0].bounds(0.)[1], cells[5].bounds(0.)[1]
+
+
 def search_contains(cell: Cell, xy: np.ndarray, margin: float = MARGIN_M) -> bool:
     x0, x1, y0, y1 = cell.search_bounds(margin)
     x, y = float(xy[0]), float(xy[1])

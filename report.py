@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import time
+
+from camera_stability import CameraStability
 
 from car_pose import (CarPose, Intrinsics, Setup, pose_moved, observation_moved,
                       OBS_STABLE_FRAMES, OBS_ANGLE_JITTER_DEG)
@@ -201,6 +204,8 @@ class FieldWatch:
         self.stable_pose = None
         self.stable_pitch = self.pitch
         self.stable_frames = 0
+        self.camera_stability = CameraStability()
+        self.camera_settled = False
         self.parallax_origins = {}
         self.local_rgb_tracks = {}
         self.autonomy = None
@@ -287,6 +292,22 @@ class FieldWatch:
                 vote.on_move()
         else:
             self.stable_frames += 1
+        now = self.autonomy.clock() if self.autonomy is not None else time.monotonic()
+        valid = color is not None and getattr(self,"pitch_measurement_valid",True)
+        samples = getattr(self,'stability_samples',None)
+        if samples is not None:
+            self.camera_stability.reset()
+            after = getattr(self,'stability_after_stamp',float('-inf'))
+            for sampled,pitch,roll,sampled_at in samples:
+                if sampled.stamp >= after:
+                    self.camera_stability.update(sampled,pitch,roll,sampled_at,valid=valid)
+            self.camera_settled = (valid and self.camera_stability.settled
+                                   and self.camera_stability.last_stamp is not None
+                                   and abs(pose.stamp-self.camera_stability.last_stamp) <= .15)
+            if self.camera_settled:
+                self.stable_frames = max(self.stable_frames,self.camera_stability.samples)
+        else:
+            self.camera_settled = self.camera_stability.update(pose,self.pitch,self.roll,now,valid=valid)
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(

@@ -116,7 +116,7 @@ def test_ros_message_preserves_corner_and_measurement_stamp(monkeypatch):
 
 
 @pytest.mark.parametrize('source', ['laptop', 'host'])
-def test_map_plans_and_opens_from_radar_without_manual_input(monkeypatch, source):
+def test_map_opens_from_radar_but_waits_for_b_before_planning(monkeypatch, source):
     import cv2
     import sys
     import numpy as np
@@ -137,8 +137,7 @@ def test_map_plans_and_opens_from_radar_without_manual_input(monkeypatch, source
     keys = iter([13, 27])
     monkeypatch.setattr(cv2, 'waitKeyEx', lambda *args: next(keys))
     m.main()
-    assert len(planned) == 1
-    assert (planned[0].x, planned[0].y, planned[0].yaw) == (pose.x,pose.y,pose.yaw)
+    assert planned == []  # 回车仅打开相机，B确认起点后才规划。
     assert opened == [(pose.x,pose.y,pose.yaw)]
     assert all(xy == (pose.x,pose.y) and yaw == pytest.approx(pose.yaw) for xy,yaw in drawn)
     assert closed == [True]
@@ -222,3 +221,13 @@ def test_radar_text_distinguishes_sample_time_from_delay(monkeypatch):
     assert '位姿延迟=679 ms' in text
     assert '测量时间=' not in text
     assert '1794746758' not in text
+
+
+def test_raw_measurement_history_requires_latest_radar_to_remain_valid(monkeypatch):
+    monkeypatch.setattr('radar_pose.time.time',lambda:100.)
+    stream=RadarPoseStream(start=False)
+    for stamp in (99.6,99.8,100.):
+        stream.accept(CarPose(0,0,0,stamp))
+    assert [p.stamp for p in stream.measurements_between(99.7,100.)] == [99.8,100.]
+    stream.invalidate('断流')
+    assert stream.measurements_between(99.,100.) == ()
