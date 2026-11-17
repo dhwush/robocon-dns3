@@ -182,6 +182,16 @@ def paint_diagnostics(color, depth, views, selected=0, locked=None):
     if 'faces' in far_white:
         descriptions[3].append(f"竖直面{far_white['faces']}个，通过{far_white.get('accepted_faces',0)}个")
     near_top = measure.get('near_top_check')
+    foreground=measure.get('foreground_check')
+    if foreground:
+        scope='实际盒面' if foreground['scope']=='candidate' else '整个搜索区'
+        descriptions[3].append(f"遮挡范围：{scope}，近前景{foreground['ratio']:.0%}；整框{foreground['full_ratio']:.0%}")
+    checks=measure.get('rgb_white_top',{}).get('checks',[])
+    states={q['far_depth']['state'] for q in checks if 'far_depth' in q}
+    if states:
+        words={'unknown':'缺测/背景不否决','supported':'本塔深度支撑',
+               'foreground':'连续前景反证','upper_occupied':'可靠上层占用','body_only':'一层仅盒身有深度'}
+        descriptions[3].append('RGB盒面深度：'+'、'.join(words[s] for s in sorted(states)))
     if near_top:
         descriptions[3].append(f"近处顶边：{near_top['valid_columns']}/{near_top['columns']}列有效")
     if measure.get('upper_object'):

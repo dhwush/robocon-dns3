@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from camera_stability import CameraStability
+from camera_stability import CameraStability,EXIT_POSITION_SPAN_M,EXIT_ANGLE_SPAN_DEG
 from car_pose import CarPose
 
 
@@ -21,7 +21,8 @@ def test_requires_elapsed_time_and_several_samples_not_just_fast_frames():
     assert not sample(gate,.6)  # 单次间断超过0.5秒，不能当连续停稳。
 
 
-@pytest.mark.parametrize('axis,value',[('x',.011),('y',.011),('yaw',math.radians(1.1)),('pitch',1.1),('roll',1.1)])
+@pytest.mark.parametrize('axis,value',[('x',EXIT_POSITION_SPAN_M+.001),('y',EXIT_POSITION_SPAN_M+.001),
+    ('yaw',math.radians(EXIT_ANGLE_SPAN_DEG+.1)),('pitch',EXIT_ANGLE_SPAN_DEG+.1),('roll',EXIT_ANGLE_SPAN_DEG+.1)])
 def test_motion_on_any_axis_requires_new_settling_period(axis,value):
     gate=CameraStability()
     for t in (0.,.2,.4,.6):
@@ -44,11 +45,32 @@ def test_yaw_wrap_and_small_noise_do_not_prevent_settling():
 def test_range_detects_jitter_in_opposite_directions_and_slow_accumulated_drift():
     gate=CameraStability()
     sample(gate,0.)
-    sample(gate,.2,CarPose(.008,0.,0.))
-    assert not sample(gate,.4,CarPose(-.008,0.,0.))
+    sample(gate,.2,CarPose(.02,0.,0.))
+    assert not sample(gate,.4,CarPose(-.02,0.,0.))
     assert gate.samples == 1
     for i in range(1,7):
-        assert not sample(gate,.4+i*.2,CarPose(-.008+.006*i,0.,0.))
+        assert not sample(gate,.4+i*.2,CarPose(-.02+.02*i,0.,0.))
+
+
+def test_centimeter_radar_jitter_settles_and_outlier_expires():
+    gate=CameraStability()
+    for i,x in enumerate((-.008,.008,-.006,.007)):
+        settled=sample(gate,i*.2,CarPose(x,0,0),pitch=.2*(i%2))
+    assert settled
+    assert gate.summary()['reason']=='已停稳'
+    for i in range(4,30):
+        assert sample(gate,i*.2,CarPose(.007,0,0))
+    assert gate.summary()['position_span_m']==0
+    assert gate.samples<=6  # 历史有界，不把整次运行的跨度累计进来。
+
+
+def test_enter_and_exit_thresholds_have_hysteresis_but_detect_continued_motion():
+    gate=CameraStability()
+    for t in (0.,.2,.4,.6):
+        sample(gate,t)
+    assert sample(gate,.8,CarPose(.03,0,0))
+    assert not sample(gate,1.,CarPose(.05,0,0))
+    assert gate.summary()['reason']=='位置跨度超限'
 
 
 def test_missing_frames_long_gaps_and_invalid_imu_clear_stability():

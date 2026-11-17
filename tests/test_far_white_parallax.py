@@ -216,12 +216,16 @@ def test_rgb_boundary_recovers_missing_depth_top_against_gray_white_background()
 
 
 @pytest.mark.parametrize('contrast,background',[(False,True),(True,False)])
-def test_missing_depth_top_requires_both_image_edge_and_background(contrast,background):
+def test_missing_depth_top_without_image_edge_is_unknown_but_rgb_can_survive_background_holes(contrast,background):
     cell,pose,offset,intr,color,depth = missing_top_scene(contrast,background)
     view = inspect_frame(pose,offset,0.,intr,color,depth)[cell.name]
-    assert view.conclusion is None
     assert 'rgb_top_height_cm' not in view.measurements['far_white']
-    assert view.needs_parallax
+    if contrast:
+        assert view.conclusion=='2'
+        assert view.method=='RGB局部盒面'
+    else:
+        assert view.conclusion is None
+        assert view.needs_parallax
 
 
 def test_image_seam_cannot_hide_an_unobserved_upper_layer():

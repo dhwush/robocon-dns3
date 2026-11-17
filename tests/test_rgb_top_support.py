@@ -25,7 +25,7 @@ def test_top_and_sides_allow_bottom_occlusion(layers):
     assert result[0]==str(layers)
 
 
-@pytest.mark.parametrize('kind',['wall','line','missing_top','wrong_depth'])
+@pytest.mark.parametrize('kind',['wall','line','missing_top','foreground_depth'])
 def test_insufficient_or_contradictory_evidence_remains_unknown(kind):
     p,c,d,_,_=S['boxes_scene'](2,4.2)
     yy,xx=np.nonzero(np.all(c==220,axis=2))
@@ -37,8 +37,8 @@ def test_insufficient_or_contradictory_evidence_remains_unknown(kind):
     elif kind=='missing_top':
         c[:int(yy.min()),int(xx.min()):int(xx.max())+1]=220
     else:
-        d[:]=8.
-    assert detect(p,c,d if kind=='wrong_depth' else None) is None
+        d[:]=2.  # 连续近处实测面才是反证，8m背景回波不再否决远处RGB。
+    assert detect(p,c,d if kind=='foreground_depth' else None) is None
 
 
 def test_internal_seam_cannot_turn_two_layers_into_one():

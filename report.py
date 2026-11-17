@@ -206,6 +206,7 @@ class FieldWatch:
         self.stable_frames = 0
         self.camera_stability = CameraStability()
         self.camera_settled = False
+        self.stability_reason='等待有效采样'
         self.parallax_origins = {}
         self.local_rgb_tracks = {}
         self.autonomy = None
@@ -308,6 +309,13 @@ class FieldWatch:
                 self.stable_frames = max(self.stable_frames,self.camera_stability.samples)
         else:
             self.camera_settled = self.camera_stability.update(pose,self.pitch,self.roll,now,valid=valid)
+        self.stability_reason=self.camera_stability.reason
+        if not valid:
+            self.stability_reason='画面或相机姿态无效'
+        elif samples is not None and not samples:
+            self.stability_reason='没有时间匹配的有效历史采样'
+        elif self.camera_stability.settled and not self.camera_settled:
+            self.stability_reason='当前位姿与停稳采样时间偏差超过0.15秒'
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(

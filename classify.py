@@ -572,6 +572,7 @@ def _tower_clutter(
     roll: float = 0.0,
     diagnostic: dict | None = None,
     color: np.ndarray | None = None,
+    candidate: np.ndarray | None = None,
 ) -> tuple[bool, bool]:
     # 第一项：搜索框里有东西比近面更近，挡住了这一格的塔。
     # 第二项：台心柱体里、台面 8 cm 以上有东西，不能把这一格写成空。
@@ -630,8 +631,21 @@ def _tower_clutter(
                     diagnostic['upper_object']=dict(points=len(attached),
                         width_cm=float(np.linalg.norm(span))*100,attached_to_body=True)
     front_n = int(np.count_nonzero(front))
-    covers = front_n / examined >= _OCCLUDE_FRAC
-    if not covers and front_n >= _DEPTH_MIN_POINTS:
+    full_ratio=front_n/examined
+    focus=None
+    if candidate is not None:
+        region=np.zeros(mask.shape,np.uint8)
+        cv2.drawContours(region,[candidate],-1,255,-1)
+        focus=region[ys,xs]>0
+        examined=float(np.count_nonzero((region>0)&(mask>0)))
+        front_n=int(np.count_nonzero(front&focus))
+    ratio=front_n/max(1.,examined)
+    # 已有真实顶边和盒面时，仅检查该盒面；底部台面/线缆不代替盒顶遮挡。
+    covers=ratio>=(.5 if focus is not None else _OCCLUDE_FRAC)
+    if diagnostic is not None:
+        diagnostic['foreground_check']=dict(scope='candidate' if focus is not None else 'search',
+            full_ratio=full_ratio,ratio=ratio,points=front_n,occludes=bool(covers))
+    if focus is None and not covers and front_n >= _DEPTH_MIN_POINTS:
         low = project(cell.center(cell.one_z), pose, offset, pitch, intr, roll)
         high = project(cell.center(cell.two_z), pose, offset, pitch, intr, roll)
         if low is not None and high is not None:
@@ -2303,6 +2317,65 @@ def _top_depth_support(values, own, xs, columns, info):
     return True
 
 
+def _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,pitch,intr,roll,level,info):
+    """远处已核验RGB盒面：背景/缺测不否决，连续前景或可靠上层占用才否决。"""
+    yy=below.ravel()
+    xx=np.broadcast_to(cols[:,None],below.shape).ravel()
+    values=depth[yy,xx].astype(float)
+    good=np.isfinite(values)&(values>=_DEPTH_NEAR_M)
+    info['far_depth']=dict(state='unknown',points=int(good.sum()))
+    evidence=info['far_depth']
+    if good.sum()<30:
+        return True
+    xx,yy,values=xx[good],yy[good],values[good]
+    origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+    rays=(((xx-intr.cx)/intr.fx)[:,None]*right
+          +((yy-intr.cy)/intr.fy)[:,None]*down+ahead)
+    world=origin+values[:,None]*rays
+    x0,x1,y0,y1=cell.search_bounds(MARGIN_M)
+    entered=_enter_depth(origin,rays,x0,x1,y0,y1)
+    front=np.isfinite(entered)&(values<entered-.12)
+    # 零散坏点、单根线和窄前景不形成整块盒面的反证。
+    unique,indices=np.unique(xx,return_inverse=True)
+    counts=np.bincount(indices)
+    hits=np.bincount(indices,weights=front)
+    covered=(counts>=3)&(hits>=.35*counts)
+    coverage=float(covered.sum()/max(1,len(cols)))
+    evidence.update(front_points=int(front.sum()),front_columns=coverage)
+    if front.sum()>=30 and front.mean()>=.2 and coverage>=.5:
+        d=values[front]
+        spread=float(np.percentile(d,90)-np.percentile(d,10))
+        if spread<=max(.15,.06*float(np.median(d))):
+            evidence.update(state='foreground',spread_m=spread)
+            info['rejection']='实际候选盒面被连续前景覆盖'
+            return False
+    own=((world[:,0]>=x0)&(world[:,0]<=x1)&(world[:,1]>=y0)&(world[:,1]<=y1)
+         &(world[:,2]>=level-.22)&(world[:,2]<=level+.08))
+    own_coverage=float(len(np.unique(xx[own]))/max(1,len(cols)))
+    evidence.update(own_points=int(own.sum()),own_columns=own_coverage)
+    surface=float(np.percentile(values[own],95)) if own.any() else float(np.nanmax(entered))
+    info['depth_background_points']=int(np.count_nonzero(values>surface+max(.12,.03*surface)))
+    if own.sum()>=30 and own_coverage>=.5:
+        evidence['state']='supported'
+        upper=info.setdefault('upper_space',{})
+        _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,upper)
+        # 相邻采样点可能命中同一小块噪声；两点占用不足以否决完整RGB盒顶。
+        reliable=any(q['observed']>=13 and q['occupied']>=8
+                     and q['occupied']/q['observed']>=.5 for q in upper['levels'])
+        if reliable:
+            evidence['state']='upper_occupied'
+            info['rejection']='本塔盒面和上方连续实测占用相互印证'
+            return False
+        if level==cell.one_z and upper['state']=='unknown':
+            top_values=depth[face_rows[:,None]+np.arange(1,5)[None,:],cols[:,None]]
+            measured=np.isfinite(top_values)&(np.abs(top_values-float(np.median(values[own])))<.5)
+            if measured.sum()<5:
+                evidence['state']='body_only'
+                info['rejection']='一层候选仅盒身有深度，顶边及可能的上层均缺测'
+                return False
+    return True
+
+
 def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,diagnostic=None,depth=None):
     """从真实顶边和局部盒面生成候选，不要求可见盒底或独立白色连通块。"""
     info={'checks':[]}
@@ -2546,12 +2619,18 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
             relative=False
             check['seam_restored_state']='2'
         # 先保留低横线供上下盒面仲裁；没有配对顶边时再独立排除接缝。
-        if (state=='1' and check['state']=='1' and depth is None
+        if (state=='1' and check['state']=='1' and (depth is None or z_cam>_DEPTH_FAR_M)
                 and _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll)):
             check['seam_rejected']=True
             continue
         level=cell.one_z if state=='1' else cell.two_z
-        if depth is not None:
+        if depth is not None and z_cam>_DEPTH_FAR_M:
+            if not _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,
+                                       pitch,intr,roll,level,check):
+                if check.get('far_depth',{}).get('state')=='foreground':
+                    info.setdefault('foreground_states',[]).append(state)
+                continue
+        elif depth is not None:
             yy,xx=below.ravel(),np.broadcast_to(cols[:,None],below.shape).ravel()
             values=depth[yy,xx].astype(float)
             good=np.isfinite(values)&(values>=_DEPTH_NEAR_M)
@@ -2588,11 +2667,19 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                +min(1.,width/.35)-.25*abs(z-level)/height_tolerance)
         check['score']=float(score)
         candidates.append((state,piece,z,relative,float(score)))
-    # 两层的真实顶边优先于下方接缝；几何验证不通过的线段不进入比较。
+    # 只比较已通过几何核验的候选，按实际盒面支撑选择。
     info['candidates']=len(candidates)
     if not candidates:
         return None
-    chosen=max(candidates,key=lambda item:(item[3],item[0]=='2',item[4]))
+    # 同层保留完整相对盒高的定位优势；不同层之间比较实际盒面支撑，
+    # 不能让“一层相对高度成立”无条件抢在完整两层顶边之前。
+    if z_cam>_DEPTH_FAR_M:
+        per_state=[max((q for q in candidates if q[0]==state),
+                       key=lambda q:(q[3],q[4]))
+                   for state in ('1','2') if any(q[0]==state for q in candidates)]
+        chosen=max(per_state,key=lambda q:(q[4],q[0]=='2'))
+    else:
+        chosen=max(candidates,key=lambda q:(q[3],q[0]=='2',q[4]))
     info['state']=chosen[0]
     info['selected_score']=chosen[4]
     return chosen[:2]
@@ -2857,7 +2944,10 @@ def _classify_cell(
         if (rgb_top_structure is not None
                 and (rgb_structure is None or (rgb_top_structure[0]=='2' and rgb_structure[0]=='1'))
                 and (conclusion is None or (depth is None and conclusion in ('1','2')
-                                           and rgb_top_structure[0]!=conclusion))):
+                                           and rgb_top_structure[0]!=conclusion)
+                     or (z_cam>_DEPTH_FAR_M and method in ('彩色','黄地','远处')
+                         and ((method=='黄地' and rgb_top_structure[0]==conclusion)
+                              or (depth is not None and rgb_top_structure[0]=='2'))))):
             conclusion,piece=rgb_top_structure
             method,hold,skip='RGB局部盒面',True,False
             shown_reason=None
@@ -2865,6 +2955,12 @@ def _classify_cell(
             conclusion,piece = rgb_structure
             method,hold,skip = 'RGB盒体边界',True,False
             shown_reason = None
+        if (conclusion in ('1','2') and method!='深度'
+                and conclusion in diagnostic.get('rgb_white_top',{}).get('foreground_states',[])
+                and (rgb_top_structure is None or rgb_top_structure[0]!=conclusion)):
+            diagnostic['foreground_blocks_fallback']=True
+            conclusion,piece,method,hold,skip=None,None,None,False,True
+            shown_reason='候选盒面有连续前景深度反证，禁止用碎片盒面回退'
         if (depth is None and conclusion=='1' and piece is not None
                 and _white_face_continues_above(piece,color,white,mask,z_cam,intr,roll)):
             diagnostic['rgb_single_seam_rejected']=True
@@ -2944,7 +3040,8 @@ def _classify_cell(
     covered = False
     occludes, holds = (False, False)
     if depth is not None:
-        occludes, holds = _tower_clutter(cell, depth, mask, pose, offset, pitch, intr, roll, diagnostic, color)
+        occludes, holds = _tower_clutter(cell, depth, mask, pose, offset, pitch, intr, roll,
+            diagnostic, color, candidate=None if rgb_top_structure is None else rgb_top_structure[1])
     near_depth_result=None
     if depth is not None and .2<z_cam<=_DEPTH_FAR_M:
         near_depth_result=_depth_on_cell(cell,cloud,mask,intr,color,blocked,labels,

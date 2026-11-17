@@ -11,6 +11,22 @@ from field_map import DISPLAY
 from tower_debug import paint_diagnostics, save_capture
 
 
+def test_debug_distinguishes_candidate_occlusion_and_unknown_far_depth(monkeypatch):
+    import tower_debug
+    lines=[]
+    def label(board,text):
+        lines.extend(text)
+        return board
+    monkeypatch.setattr(tower_debug,'_label',label)
+    color=np.zeros((120,160,3),np.uint8)
+    view=SimpleNamespace(conclusion='2',reason=None,method='RGB局部盒面',region=None,
+        measurements={'foreground_check':dict(scope='candidate',ratio=0.,full_ratio=.3),
+                      'rgb_white_top':{'checks':[{'far_depth':{'state':'unknown'}}]}})
+    paint_diagnostics(color,np.full((120,160),np.nan),{DISPLAY[0]:view})
+    assert any('实际盒面' in line and '整框30%' in line for line in lines)
+    assert any('缺测/背景不否决' in line for line in lines)
+
+
 def test_ssh_search_box_visible_without_classification():
     from view_field import paint_window
     color = np.zeros((400, 600, 3), np.uint8)

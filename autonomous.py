@@ -443,7 +443,15 @@ class AutonomousSurvey:
         if not watch.have_color or not self._camera_ready():
             for evidence in self.evidence.values():
                 evidence.clear()
-            self.message = "等待相机停稳：连续0.6秒、至少3次有效采样；位置变化≤1厘米，朝向/俯仰/横滚变化≤1°"
+            gate=getattr(watch,'camera_stability',None)
+            detail=''
+            if gate is not None:
+                state=gate.summary()
+                reason=getattr(watch,'stability_reason',state['reason'])
+                detail=(f"；{reason}，{state['samples']}次/{state['duration_s']:.2f}秒，"
+                        f"位置跨度{state['position_span_m']*100:.1f}厘米")
+            self.message = ("等待相机停稳：连续0.6秒、至少3次有效采样；位置跨度≤2.5厘米，"
+                            "朝向/俯仰/横滚跨度≤1°"+detail)
             if not self.stationary_scan:
                 self.look_key = self.look_started = None
             elif self._expire_look(now):
