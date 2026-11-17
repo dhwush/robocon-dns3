@@ -193,6 +193,10 @@ def live_panels(watch, pose, source, extras=()):
     if survey is not None:
         metrics = survey.metrics()
         route_hint.append(f"本轮观测 {metrics['observation_count']} 次 · 累计路程 {metrics['distance_m']:.3f} 米")
+    for name, view in watch.views.items():
+        risk = (view.measurements or {}).get('view_risk')
+        if risk:
+            route_hint.append(f"{TOWER_NO[name]}号 {risk['reason']}；{risk['action']}")
     bottom = route_hint + ([survey.message] if survey is not None else []) + list(extras)
     bottom += ["朝向以场地前方为0°；完整位置/朝向/俯仰计一次观测；已识别塔不复测",
                "1–5 光线 | d 诊断 | n 切换塔 | s 保存 | q 退出"]
@@ -219,6 +223,11 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
                     tags.append((max(0, x), max(0, y - 24),
                                  f"{TOWER_NO[name]} 搜索框", bgr))
             measure = getattr(view, "measurements", None) or {}
+            risk = measure.get('view_risk')
+            if risk and view.region is not None:
+                rx, ry, _, _ = cv2.boundingRect(view.region)
+                tags.append((max(0, rx), max(0, ry + 24),
+                             f"{TOWER_NO[name]}号 {risk['reason']}；{risk['action']}", (0, 165, 255)))
             display_piece = measure.get('display_piece',view.piece)
             if display_piece is not None:
                 cv2.drawContours(board, [display_piece], -1, bgr, 2, cv2.LINE_AA)
@@ -479,7 +488,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
     from terminal_ui import LiveUI, TerminalDashboard
     headless = getattr(args, "headless", False)
     ui = LiveUI(cv2, headless)
-    dashboard = TerminalDashboard() if headless else None
+    dashboard = TerminalDashboard()
     if headless:
         print("SSH终端模式：相机和雷达由运行本程序的主机读取。", flush=True)
         print("终端直接按键操作：b 开始，c 确认，1-5 光线，d 诊断，n 切塔，s 保存，q 退出。", flush=True)
@@ -584,7 +593,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     continue
                 if matched is None:
                     suspend_for_radar(watch)
-                    message = radar_pose_text(None) + '；' + (radar_stream.error or '等待与雷达时间匹配的新相机帧（差值上限0.15秒）')
+                    message = '等待定位与画面同步，暂停识别和移动；恢复后自动继续'
                     confirm_ui['target'] = None
                     if not headless:
                         ui.imshow(CAMERA_WINDOW, paint_window(color, None, {}, [message]))
@@ -655,8 +664,6 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             result_mode = args.mode
             lines = watch.lines(result_mode)
             shown = watch.window_lines(result_mode)
-            if source in ("radar", "ros", "laptop", "host"):
-                shown = [radar_pose_text(current)] + shown
             text = "\n".join(shown)
             if dashboard is not None:
                 # 识别画面可能较旧；面板优先读取此刻有效的雷达与IMU反馈。
@@ -664,7 +671,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                 with lock:
                     live_gravity = camera_frames.get("gravity")
                     live_pitch = pitch_from_gravity(live_gravity)
-                if dashboard.notice.startswith('雷达等待有效位姿'):
+                if dashboard.notice == '等待定位与画面同步，暂停识别和移动；恢复后自动继续':
                     dashboard.notice=''
                 dashboard.show(watch,live_pose,live_pitch)
             elif text != previous:

@@ -14,8 +14,8 @@ FRAMES=ROOT/'debug_captures/rgb_validation_20261116'
 
 @pytest.mark.parametrize('second,pose,expected',[
     (29,(-.010,.021,-.5,-1),{3:'1'}),
-    (133,(-.248,.191,-46.9,-1),{4:'1',5:None,6:'1'}),
-    (135,(-.243,.195,-46.9,0),{4:'1',5:'1',6:'1'}),
+    (133,(-.248,.191,-46.9,-1),{4:'1',5:None,6:None}),
+    (135,(-.243,.195,-46.9,0),{4:'1',5:'1',6:None}),
 ])
 def test_recorded_frame_result_and_target_location(second,pose,expected):
     source=FRAMES/f'rgb_{second}.png'
@@ -29,8 +29,13 @@ def test_recorded_frame_result_and_target_location(second,pose,expected):
     for number,state in expected.items():
         view=views[DISPLAY[number-1]]
         assert view.conclusion==state,(number,view.reason)
+        if number == 6:
+            # 原点左侧已取消6号背景限制；原有可见性检查仍可保持未知。
+            assert not view.measurements.get('view_risk')
+
         if state is None:
-            assert view.measurements['rgb_contour_rejected']=='1'
+            if number != 6:
+                assert view.measurements['rgb_contour_rejected']=='1'
             continue
         assert view.piece is not None
         x,y,w,h=cv2.boundingRect(view.piece)

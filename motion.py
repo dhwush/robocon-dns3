@@ -18,7 +18,7 @@ import numpy as np
 
 from car_pose import BODY_HALF_M, turned_pose, CAMERA_HEIGHT_M, CarPose, Intrinsics, bearing_deg, camera_position, body_center, project
 from classify import MIN_VISIBLE_M, CellView, _pitch_target, _view_flags
-from field_map import TOWER_NO, all_cells, ground_towers, tower_cells, driving_exclusions, right_front_x_limits
+from field_map import TOWER_NO, all_cells, ground_towers, tower_cells, driving_exclusions, right_front_x_limits, observation_risk
 from sight import visible_height, sees
 
 
@@ -1179,7 +1179,9 @@ def observation_quality(cell, pose, offset, intr):
                (cell.base_z+.10,cell.one_z-.08,cell.one_z))/3
     cap = sum(sees(pose,offset,0.,cell,z) for z in
               (cell.two_z+.08,cell.cap_z-.02))/2
-    return float(framing*pixels*stand_off*(.6*body+.4*cap))
+    # 规划时尚不知道层数，风险只轻度降优先级，不能提前排除两层/顶块观察机会。
+    risk_weight = .8 if observation_risk(cell, pose.x, pose.y) else 1.
+    return float(framing*pixels*stand_off*(.6*body+.4*cap)*risk_weight)
 
 
 def nearest_observation(pose, offset, intr, need, exhausted=None, references=None, pitch=0.0, failed=(),

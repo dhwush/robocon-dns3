@@ -18,7 +18,7 @@ CASES=json.loads((FRAMES/'cases.json').read_text())
 
 @pytest.mark.parametrize('case',CASES,ids=lambda c:c['id'])
 @pytest.mark.parametrize('mode',['rgb','missing','background','foreground'])
-def test_recorded_far_tower_uses_real_top_and_only_reliable_depth_veto(case,mode):
+def test_recorded_far_tower_requires_measured_ownership_when_depth_provided(case,mode):
     color=cv2.imread(str(FRAMES/(case['id']+'.png')))
     assert color is not None
     depth=None if mode=='rgb' else np.full(color.shape[:2],
@@ -31,7 +31,7 @@ def test_recorded_far_tower_uses_real_top_and_only_reliable_depth_veto(case,mode
         pose,OPTICAL_FROM_CORNER,pitch,intr,
         float(to_camera(cell.center(cell.one_z),pose,OPTICAL_FROM_CORNER,pitch)[2]),depth=depth)
     view=inspect_frame(pose,OPTICAL_FROM_CORNER,pitch,intr,color,depth,0)[DISPLAY[2]]
-    if mode=='foreground':
+    if mode!='rgb':
         assert result is None
         assert view.conclusion is None,(view.reason,view.measurements)
     else:

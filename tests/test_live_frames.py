@@ -79,8 +79,10 @@ def test_live_camera_keeps_reading_frames_after_map_status_update(monkeypatch, t
     assert stopped == [True]
     if headless:
         printed=capsys.readouterr().out
-        assert '当前实时：' in printed
-        assert '立即要求：' in printed
+        assert '当前位置：' in printed
+        assert '雷达等待有效位姿' not in printed
+        assert '位姿延迟=' not in printed
+        assert '当前要求：' in printed
         assert printed.count('最终汇总：') == 1
         assert '本帧=' not in printed
 

@@ -92,9 +92,9 @@ def test_panel_shows_current_pose_safe_waypoint_and_full_observation_goal():
     watch=dashboard_watch()
     rows,_,_=terminal_status(watch,CarPose(.1,.15,.3),5.)
     text='\n'.join(rows)
-    assert '当前实时：x=+0.100 m  y=+0.150 m  yaw=+17.2°  俯仰=+5.0°' in text
-    assert '立即要求：x=+0.200 m  y=+0.100 m' in text
-    assert '本次观测目标：x=+0.500 m  y=+0.400 m  yaw=+34.4°  俯仰=+12.0°' in text
+    assert '当前位置：x=+0.100 m  y=+0.150 m  yaw=+17.2°  俯仰=+5.0°' in text
+    assert '当前要求：x=+0.200 m  y=+0.100 m' in text
+    assert '最终观测位置（按下一步命令逐步到达）：x=+0.500 m  y=+0.400 m  yaw=+34.4°  俯仰=+12.0°' in text
     assert '向右平移' in text
     assert '本站观察：1号' in text
 
@@ -107,7 +107,7 @@ def test_yaw_requirement_uses_rotated_right_front_corner():
     watch.autonomy.action=Action('yaw','',yaw=.8,pitch=12.)
     current=CarPose(.1,.2,0.)
     rows,_,_=terminal_status(watch,current,4.)
-    assert '立即要求：'+_pose_text(turned_pose(current,.8),12.) in rows
+    assert '当前要求：'+_pose_text(turned_pose(current,.8),12.) in rows
 
 
 def test_dashboard_refreshes_same_screen_then_identification_and_summary_once():
@@ -154,7 +154,7 @@ def test_missing_pose_and_blocked_path_do_not_suggest_return_to_start():
     rows,_,_=terminal_status(watch,None,None)
     text='\n'.join(rows)
     assert '暂停移动和确认' in text
-    assert '立即要求：暂无移动要求' in text
+    assert '当前要求：暂无移动要求' in text
     assert '已确认：无' in text
 
 

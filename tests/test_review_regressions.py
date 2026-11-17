@@ -75,7 +75,7 @@ def test_height_rejection_reports_measured_height():
     assert '层高不符' in view.reason and '厘米' in view.reason
 
 
-def test_sparse_depth_allows_valid_color():
+def test_sparse_depth_cannot_confirm_rgb_layer_without_ownership():
     setup, pose, offset = m['_basic']()
     cell = m['_cell']('右侧地面远一格')
     color = m['_blank']()
@@ -85,4 +85,5 @@ def test_sparse_depth_allows_valid_color():
     )
     depth = np.full(color.shape[:2], np.nan, np.float32)
     view = inspect_frame(pose, offset, 0., INTR, color, depth)[cell.name]
-    assert view.conclusion == '1'
+    assert view.conclusion is None
+    assert view.skip_vote

@@ -1,0 +1,66 @@
+[
+  {
+    "second": 3,
+    "pose": [
+      0.12,
+      -0.055,
+      -40.5,
+      6
+    ],
+    "tower": 6,
+    "result": null,
+    "reason": "底线左侧看6号：铁皮柜背景风险；禁止弱证据确认，请换位观察",
+    "risk": {
+      "reason": "底线左侧看6号：铁皮柜背景风险",
+      "rejected": false,
+      "candidate": null,
+      "method": null,
+      "action": "禁止确认，换位观察"
+    }
+  },
+  {
+    "second": 60,
+    "pose": [
+      -0.967,
+      0.441,
+      -2.7,
+      6
+    ],
+    "tower": 2,
+    "result": null,
+    "reason": "轮廓不符：白块破碎、被遮挡或直边检查未通过",
+    "risk": null
+  },
+  {
+    "second": 163,
+    "pose": [
+      1.85,
+      0.678,
+      72.8,
+      6
+    ],
+    "tower": 1,
+    "result": null,
+    "reason": "地图右侧看1号：纸板背景风险；禁止弱证据确认，请换位观察",
+    "risk": {
+      "reason": "地图右侧看1号：纸板背景风险",
+      "rejected": true,
+      "candidate": "2",
+      "method": "RGB局部盒面",
+      "action": "禁止确认，换位观察"
+    }
+  },
+  {
+    "second": 241,
+    "pose": [
+      1.96,
+      0.709,
+      41.2,
+      5
+    ],
+    "tower": 3,
+    "result": null,
+    "reason": "白盒与背景未分离：缺少深度，需要侧向视角；彩色层高不符：可见高109.3厘米；一层允许0.0至0.0，两层允许15.0至45.0厘米",
+    "risk": null
+  }
+]

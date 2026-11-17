@@ -1,4 +1,4 @@
-"""远处RGB与深度分工：未知深度不否决，真实前景和上层占用仍拒绝。"""
+"""远处RGB确认必须有本塔深度；缺测、背景与前景均不能冒充盒面。"""
 import runpy
 
 import numpy as np
@@ -20,14 +20,13 @@ def local(p,color,depth,info=None):
 @pytest.mark.parametrize('layers',[1,2])
 @pytest.mark.parametrize('distance',[3.2,4.2])
 @pytest.mark.parametrize('value',[np.nan,8.])
-def test_far_visible_top_survives_missing_or_background_depth(layers,distance,value):
+def test_far_visible_top_requires_own_depth_despite_rgb_edges(layers,distance,value):
     p,color,depth,_,_=SCENE['boxes_scene'](layers,distance)
     depth[:]=value
     result=local(p,color,depth)
-    assert result is not None and result[0]==str(layers)
+    assert result is None
     view=inspect_frame(p,OFFSET,0,INTR,color,depth)[CELL.name]
-    assert view.conclusion==str(layers),(view.reason,view.measurements)
-    assert view.method in ('RGB局部盒面','RGB盒体边界')
+    assert view.conclusion is None,(view.reason,view.measurements)
 
 
 @pytest.mark.parametrize('pattern',['all','alternating_rows'])
@@ -81,3 +80,37 @@ def test_gray_cap_with_measured_upper_occupation_does_not_become_plain_two():
     color[red_blue]=120
     view=inspect_frame(p,OFFSET,0,INTR,color,depth)[CELL.name]
     assert view.conclusion is None,(view.conclusion,view.measurements)
+
+
+@pytest.mark.parametrize('layers',[1,2])
+def test_measured_far_tower_keeps_correct_layer(layers):
+    p,color,depth,_,_=SCENE['boxes_scene'](layers,4.2)
+    view=inspect_frame(p,OFFSET,0,INTR,color,depth)[CELL.name]
+    assert view.conclusion==str(layers),(view.reason,view.measurements)
+
+
+def test_single_layer_with_unobserved_upper_space_stays_unknown():
+    from classify import _rgb_result_depth_check
+    p,color,depth,_,_=SCENE['boxes_scene'](1,4.2)
+    result=local(p,color,depth)
+    assert result is not None
+    # 保留实际一层盒面，抹去背景，不能将缺测当作不存在第二层。
+    depth[depth>6]=np.nan
+    info={}
+    assert not _rgb_result_depth_check(CELL,result[1],'1',depth,p,OFFSET,0,INTR,0,info)
+    assert info['upper_space']['state']=='unknown'
+
+
+def test_final_rgb_guard_rejects_foreground_even_with_some_own_depth():
+    from classify import _rgb_result_depth_check
+    p,color,depth,_,_=SCENE['boxes_scene'](2,4.2)
+    result=local(p,color,depth)
+    assert result is not None
+    import cv2
+    region=np.zeros(depth.shape,np.uint8)
+    cv2.fillPoly(region,[result[1]],255)
+    yy,xx=np.nonzero(region)
+    depth[yy[::2],xx[::2]]=2.
+    info={}
+    assert not _rgb_result_depth_check(CELL,result[1],'2',depth,p,OFFSET,0,INTR,0,info)
+    assert '前景' in info['rejection']

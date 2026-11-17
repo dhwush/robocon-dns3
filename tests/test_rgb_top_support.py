@@ -71,11 +71,11 @@ def test_local_rgb_keeps_single_frame_result_and_records_history():
     assert not tracks
 
 
-def test_complete_body_height_resolves_shifted_absolute_top():
+def test_elevated_visible_body_cannot_downgrade_absolute_two_to_one():
     p,c,d,render,_=S['boxes_scene'](0,4.2)
     render(CELL.x-.175,CELL.x+.175,CELL.y-.175,CELL.y+.175,.30,.65,(220,220,220))
-    result=detect(p,c)
-    assert result is not None and result[0]=='1'
+    result=detect(p,c,d)
+    assert result is None or result[0]=='2'
 
 
 @pytest.mark.parametrize('layers',[1,2])

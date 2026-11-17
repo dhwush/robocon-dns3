@@ -65,7 +65,7 @@ def terminal_results(watch):
 def _pose_text(pose,pitch):
     import math
     if pose is None:
-        return 'x=--  y=--  yaw=--  俯仰=--（等待有效实时位姿）'
+        return 'x=-- m  y=-- m  yaw=--°  俯仰=--（等待定位恢复）'
     tilt='--' if pitch is None else f'{pitch:+.1f}°'
     return f'x={pose.x:+.3f} m  y={pose.y:+.3f} m  yaw={math.degrees(pose.yaw):+.1f}°  俯仰={tilt}'
 
@@ -96,8 +96,8 @@ def terminal_status(watch,pose,pitch):
                'stop':'停止'}.get(action.kind,action.kind)
     else:
         phase='起点已确认，保持不动，等待停稳识别'
-    rows=['任务三 · 实时状态（本屏原地更新）',f'状态：{phase}',
-          '当前实时：'+_pose_text(pose,pitch)]
+    rows=['任务三 · 实时状态（坐标：场地原点 / 车身右前角；yaw：车头朝向）',f'状态：{phase}',
+          '当前位置：'+_pose_text(pose,pitch)]
     command='等待当前点识别完成，程序自动给出下一步'
     target=None
     target_pitch=pitch
@@ -130,13 +130,13 @@ def terminal_status(watch,pose,pitch):
     elif action is not None and action.kind=='blocked':
         command='停止！'+getattr(survey,'message','等待安全观察点')
     rows += ['下一步命令：'+command,
-             '立即要求：'+(_pose_text(target,target_pitch) if target is not None else '暂无移动要求')]
+             '当前要求：'+(_pose_text(target,target_pitch) if target is not None else '暂无移动要求')]
     if goal is not None:
         final=CarPose(goal.observation_x,goal.observation_y,goal.observation_yaw)
-        rows.append('本次观测目标：'+_pose_text(final,goal.observation_pitch))
+        rows.append('最终观测位置（按下一步命令逐步到达）：'+_pose_text(final,goal.observation_pitch))
         rows.append('本站观察：'+'、'.join(TOWER_NO[n]+'号' for n in goal.cells))
     else:
-        rows += ['本次观测目标：等待起点确认' if awaiting else '本次观测目标：当前起点' ,'本站观察：仅尚未确认的塔']
+        rows += ['最终观测位置：等待起点确认' if awaiting else '最终观测位置：当前起点' ,'本站观察：仅尚未确认的塔']
     confirmed={n:v.locked for n,v in watch.votes.items() if v.locked is not None and not v.recheck}
     rows.append('已确认：'+('；'.join(TOWER_NO[n]+'号='+str(confirmed[n]) for n in DISPLAY if n in confirmed) or '无'))
     rows.append('待确认：'+('、'.join(TOWER_NO[n]+'号' for n in DISPLAY if n not in confirmed) or '无'))

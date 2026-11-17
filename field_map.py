@@ -180,3 +180,17 @@ def search_contains(cell: Cell, xy: np.ndarray, margin: float = MARGIN_M) -> boo
     x, y = float(xy[0]), float(xy[1])
     return x0 <= x <= x1 and y0 <= y <= y1
 
+
+
+def observation_risk(cell: Cell, x: float, y: float) -> str | None:
+    """按右前角场地坐标定义已知背景风险；不依赖图像像素或当前yaw。"""
+    right_edge = ORIGIN_X + 3 * CELL_M
+    # 右下角绿色塔基（4号所在1.2m台）的左边缘：x=0.585m。
+    lower_right_left = ORIGIN_X + 2 * CELL_M
+    if cell.name == DISPLAY[5] and 0.0 < x < lower_right_left and y <= ORIGIN_Y:
+        return '底线原点右侧至右下绿台左沿看6号：铁皮柜背景风险'
+    # 右侧走廊只保护1号；6号塔位南北中线以上才触发。
+    six_mid_y = ground_towers()[2].y
+    if cell.name == DISPLAY[0] and x >= right_edge - .15 and y >= six_mid_y - 1e-9:
+        return '右侧走廊6号中线以上看1号：纸板背景风险'
+    return None

@@ -592,7 +592,9 @@ def test_primary_path_is_short_and_every_station_has_looks():
     assert stops[-1].kind == 'B近点'
     assert sum(math.dist(a,b) for a,b in zip(line,line[1:])) <= 1.8
     assert all(s.looks for s in stops)
-    assert {look.number for look in stops[0].looks} >= {'3','6'}
+    assert '3' in {look.number for look in stops[0].looks}
+    # 尚未识别层数时不提前排除起点看6号；0/1层由最终证据策略拦截。
+    assert '6' in {look.number for look in stops[0].looks}
     assert all(motion._parking_clear(s.x,s.y,pose.yaw) for s in stops)
     assert all(motion._path_clear(*a,*b,pose.yaw) for a,b in zip(line,line[1:]))
 

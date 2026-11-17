@@ -1,0 +1,160 @@
+.................................................F...................... [ 11%]
+..................................................................FF.... [ 23%]
+........................................................................ [ 35%]
+.......................F................................................ [ 47%]
+........................................................................ [ 58%]
+........................................................................ [ 70%]
+........................................................................ [ 82%]
+..........................................................F............. [ 94%]
+..............FF....................                                     [100%]
+=================================== FAILURES ===================================
+____________ test_primary_path_is_short_and_every_station_has_looks ____________
+
+    def test_primary_path_is_short_and_every_station_has_looks():
+        import motion
+        pose = CarPose(0,0,0)
+        stops,line = motion.primary_route(pose,np.zeros(2),load_intrinsics('config/intrinsics.yaml'))
+        assert stops[0].kind == 'A起点'
+        assert (stops[0].x,stops[0].y) == (0,0)
+        assert len(stops) >= 2
+        assert stops[-1].kind == 'B近点'
+        assert sum(math.dist(a,b) for a,b in zip(line,line[1:])) <= 1.8
+        assert all(s.looks for s in stops)
+>       assert {look.number for look in stops[0].looks} >= {'3','6'}
+E       AssertionError: assert {'1', '2', '3', '4', '5'} >= {'3', '6'}
+E         
+E         Extra items in the right set:
+E         '6'
+
+tests/test_autonomous.py:595: AssertionError
+______ test_other_tower_removed_before_counting_two_own_candidates[False] ______
+
+with_depth = False
+
+    @pytest.mark.parametrize('with_depth',[False,True])
+    def test_other_tower_removed_before_counting_two_own_candidates(with_depth):
+        p,c,d=overlapping_scene('2',both=True)
+        assert local_reading(CELLS['2'],p,c)[1]['candidates']==2
+        views=inspect_frame(p,OFFSET,0.,INTR,c,d if with_depth else None)
+        assert views[CELLS['2'].name].conclusion=='红'
+>       assert views[CELLS['6'].name].conclusion=='蓝'
+E       AssertionError: assert None == '蓝'
+E        +  where None = CellView(conclusion=None, in_view=True, needs_yaw=False, needs_pitch=False, blocked=True, bearing_deg=-0.0965846014332...cted': True, 'candidate': '蓝', 'method': 'RGB顶块', 'action': '禁止确认，换位观察'}, 'needs_parallax': True}, needs_parallax=True).conclusion
+
+tests/test_cap_ownership.py:66: AssertionError
+______ test_other_tower_removed_before_counting_two_own_candidates[True] _______
+
+with_depth = True
+
+    @pytest.mark.parametrize('with_depth',[False,True])
+    def test_other_tower_removed_before_counting_two_own_candidates(with_depth):
+        p,c,d=overlapping_scene('2',both=True)
+        assert local_reading(CELLS['2'],p,c)[1]['candidates']==2
+        views=inspect_frame(p,OFFSET,0.,INTR,c,d if with_depth else None)
+        assert views[CELLS['2'].name].conclusion=='红'
+>       assert views[CELLS['6'].name].conclusion=='蓝'
+E       AssertionError: assert None == '蓝'
+E        +  where None = CellView(conclusion=None, in_view=True, needs_yaw=False, needs_pitch=False, blocked=True, bearing_deg=-0.0965846014332...cted': True, 'candidate': '蓝', 'method': 'RGB顶块', 'action': '禁止确认，换位观察'}, 'needs_parallax': True}, needs_parallax=True).conclusion
+
+tests/test_cap_ownership.py:66: AssertionError
+________ test_lateral_request_selects_reachable_view_with_real_parallax ________
+
+    def test_lateral_request_selects_reachable_view_with_real_parallax():
+        cell,pose,offset,intr,color,depth = scene(2,True)
+        views = inspect_frame(pose,offset,0.,intr,color,depth)
+        locked = {name:'0' for name in DISPLAY}
+        locked[cell.name] = None
+        action = plan_action(views,locked,pose,offset,0.,True,intr)
+>       assert action.kind == 'move'
+E       AssertionError: assert 'stuck' == 'move'
+E         
+E         - move
+E         + stuck
+
+tests/test_far_white_parallax.py:128: AssertionError
+_______ test_near_partial_measured_body_recovers_without_rgb_outline[1] ________
+
+layers = 1
+
+    @pytest.mark.parametrize('layers',[1,2])
+    def test_near_partial_measured_body_recovers_without_rgb_outline(layers):
+        p,c,d,_,rays=S['boxes_scene'](layers,1.8)
+        origin,*_=camera_frame(p,S['OFFSET'],0)
+        world=origin+d[...,None]*rays
+        # 保留13.5cm宽的实测盒面；其余盒面深度缺测，背景深度仍真实可用。
+        body=d<6
+        d[body&(world[...,0]<S['CELL'].x+.035)]=np.nan
+        c[:]=160
+        v=inspect_frame(p,S['OFFSET'],0,S['INTR'],c,d)[S['CELL'].name]
+        assert v.conclusion==str(layers),(v.reason,v.measurements)
+>       assert v.method in ('深度','上部盒面')
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert '深度' == '上部盒面'
+E         
+E         - 上部盒面
+E         + 深度
+
+tests/test_video_170811.py:52: AssertionError
+_____ test_recorded_frame_result_and_target_location[133-pose1-expected1] ______
+
+second = 133, pose = (-0.248, 0.191, -46.9, -1)
+expected = {4: '1', 5: None, 6: '1'}
+
+    @pytest.mark.parametrize('second,pose,expected',[
+        (29,(-.010,.021,-.5,-1),{3:'1'}),
+        (133,(-.248,.191,-46.9,-1),{4:'1',5:None,6:None}),
+        (135,(-.243,.195,-46.9,0),{4:'1',5:'1',6:None}),
+    ])
+    def test_recorded_frame_result_and_target_location(second,pose,expected):
+        source=FRAMES/f'rgb_{second}.png'
+        if not source.exists():
+            pytest.skip('本机录像RGB验证样本未附带')
+        color=cv2.imread(str(source))
+        x,y,yaw,pitch=pose
+        views=inspect_frame(CarPose(x,y,math.radians(yaw)),OPTICAL_FROM_CORNER,pitch,
+                            load_intrinsics(str(ROOT/'config/intrinsics.yaml')),color,None,0)
+        rois={3:(290,390,410,465),4:(555,410,820,590),5:(905,460,1110,590),6:(455,360,540,445)}
+        for number,state in expected.items():
+            view=views[DISPLAY[number-1]]
+>           assert view.conclusion==state,(number,view.reason)
+E           AssertionError: (6, '底线左侧看6号：铁皮柜背景风险；禁止弱证据确认，请换位观察')
+E           assert None == '1'
+E            +  where None = CellView(conclusion=None, in_view=True, needs_yaw=False, needs_pitch=False, blocked=True, bearing_deg=-6.9217506060463... '底线左侧看6号：铁皮柜背景风险', 'rejected': False, 'candidate': None, 'method': None, 'action': '禁止确认，换位观察'}}, needs_parallax=True).conclusion
+
+tests/test_video_single_frame.py:31: AssertionError
+_____ test_recorded_frame_result_and_target_location[135-pose2-expected2] ______
+
+second = 135, pose = (-0.243, 0.195, -46.9, 0)
+expected = {4: '1', 5: '1', 6: '1'}
+
+    @pytest.mark.parametrize('second,pose,expected',[
+        (29,(-.010,.021,-.5,-1),{3:'1'}),
+        (133,(-.248,.191,-46.9,-1),{4:'1',5:None,6:None}),
+        (135,(-.243,.195,-46.9,0),{4:'1',5:'1',6:None}),
+    ])
+    def test_recorded_frame_result_and_target_location(second,pose,expected):
+        source=FRAMES/f'rgb_{second}.png'
+        if not source.exists():
+            pytest.skip('本机录像RGB验证样本未附带')
+        color=cv2.imread(str(source))
+        x,y,yaw,pitch=pose
+        views=inspect_frame(CarPose(x,y,math.radians(yaw)),OPTICAL_FROM_CORNER,pitch,
+                            load_intrinsics(str(ROOT/'config/intrinsics.yaml')),color,None,0)
+        rois={3:(290,390,410,465),4:(555,410,820,590),5:(905,460,1110,590),6:(455,360,540,445)}
+        for number,state in expected.items():
+            view=views[DISPLAY[number-1]]
+>           assert view.conclusion==state,(number,view.reason)
+E           AssertionError: (6, '底线左侧看6号：铁皮柜背景风险；禁止弱证据确认，请换位观察')
+E           assert None == '1'
+E            +  where None = CellView(conclusion=None, in_view=True, needs_yaw=False, needs_pitch=False, blocked=True, bearing_deg=-6.9372212454704... '底线左侧看6号：铁皮柜背景风险', 'rejected': False, 'candidate': None, 'method': None, 'action': '禁止确认，换位观察'}}, needs_parallax=True).conclusion
+
+tests/test_video_single_frame.py:31: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_autonomous.py::test_primary_path_is_short_and_every_station_has_looks
+FAILED tests/test_cap_ownership.py::test_other_tower_removed_before_counting_two_own_candidates[False]
+FAILED tests/test_cap_ownership.py::test_other_tower_removed_before_counting_two_own_candidates[True]
+FAILED tests/test_far_white_parallax.py::test_lateral_request_selects_reachable_view_with_real_parallax
+FAILED tests/test_video_170811.py::test_near_partial_measured_body_recovers_without_rgb_outline[1]
+FAILED tests/test_video_single_frame.py::test_recorded_frame_result_and_target_location[133-pose1-expected1]
+FAILED tests/test_video_single_frame.py::test_recorded_frame_result_and_target_location[135-pose2-expected2]
+7 failed, 605 passed in 181.92s (0:03:01)

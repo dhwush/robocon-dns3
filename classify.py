@@ -25,7 +25,7 @@ import cv2
 import numpy as np
 
 from car_pose import CAMERA_HEIGHT_M, CarPose, Intrinsics, bearing_deg, camera_frame, camera_position, project, to_camera
-from field_map import MARGIN_M, Cell, tower_cells
+from field_map import MARGIN_M, Cell, tower_cells, observation_risk
 from sight import sees, visible_height
 
 
@@ -929,7 +929,7 @@ def _near_depth_top(world,xs,ys,depth,intr,diagnostic=None):
     return good
 
 
-def _near_body_support(cell,world,distance,xs,ys,shape,diagnostic=None):
+def _near_body_support(cell,world,distance,xs,ys,shape,diagnostic=None,min_width=WIDTH_MIN_M):
     """先在三维中选择前侧盒体，再量高度；搜索范围不是物体归属证明。"""
     info={'groups':[]}
     if diagnostic is not None:
@@ -948,7 +948,7 @@ def _near_body_support(cell,world,distance,xs,ys,shape,diagnostic=None):
         detail=dict(id=label,points=int(own.sum()),width_cm=width*100,
                     visible_cm=span*100,front_m=front)
         info['groups'].append(detail)
-        if WIDTH_MIN_M<=width<=WIDTH_MAX_M and span>=.035:
+        if min_width<=width<=WIDTH_MAX_M and span>=.035:
             groups.append((front,label,own))
     if not groups:
         info['reason']='没有独立且宽高支撑充分的盒体'
@@ -991,6 +991,16 @@ def _near_body_support(cell,world,distance,xs,ys,shape,diagnostic=None):
             info['reason']='多个独立盒体距离接近，归属不唯一'
             return None
     return selected
+
+
+def _precise_upper_support(cell,level,pose,offset,pitch,intr,depth,roll):
+    """允许远离盒顶的部分缺测；近顶两档须有空域支撑，实测占用始终否决。"""
+    upper={}
+    clear=_upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,upper)
+    supported=bool(upper['levels']) and all(
+        q['observed']>=13 and q['clear']>=.8*q['observed']
+        for q in upper['levels'][:2])
+    return upper,upper['state']!='occupied' and (clear or supported)
 
 
 def _depth_on_cell(
@@ -1122,9 +1132,15 @@ def _depth_on_cell(
             and heights_match_level(seen, cell.two_z)
             and not heights_match_level(top_z, cell.two_z)
         ):
-            top_z = seen
-            if diagnostic is not None:
-                diagnostic["height_source"] = "彩色顶边补高"
+            # 深度已紧贴一层且近顶空域成立时，RGB高横线不能抢占为两层。
+            upper,precise_one=({},False)
+            if depth is not None and not blocked and abs(top_z-cell.one_z)<=.03+1e-6:
+                upper,precise_one=_precise_upper_support(
+                    cell,cell.one_z,pose,offset,pitch,intr,depth,roll)
+            if not precise_one:
+                top_z = seen
+                if diagnostic is not None:
+                    diagnostic["height_source"] = "彩色顶边补高"
     one_ok = (not blocked) and heights_match_level(top_z, cell.one_z)
     two_ok = heights_match_level(top_z, cell.two_z)
     # 中间高度没有足够证据，保持未知。
@@ -1162,6 +1178,26 @@ def _depth_on_cell(
         )
     if pose is not None and offset is not None:
         depth_top=_near_depth_top(world,xs,ys,depth,intr,diagnostic)
+        # 实体归属、点数、宽度、出画检查已通过。顶高紧贴某一档时，
+        # 不再因局部顶边/颜色轮廓的弱证据跳回未知；明确上层占用仍否决。
+        level=min((cell.one_z,cell.two_z),key=lambda z:abs(top_z-z))
+        precise=(abs(top_z-level)<=.03+1e-6
+                 and (level!=cell.one_z or not blocked)
+                 and (diagnostic or {}).get('height_source')!='彩色顶边补高')
+        if precise and depth is not None:
+            # 部分上方缺测允许存在；完全缺测不能把被截断的两层认成一层。
+            upper,accepted=_precise_upper_support(cell,level,pose,offset,pitch,intr,depth,roll)
+            if diagnostic is not None:
+                diagnostic['precise_depth']=dict(height_cm=top_z*100,
+                    error_cm=abs(top_z-level)*100,limit_cm=3.,
+                    upper_space=upper,accepted=accepted)
+            if upper['state']=='occupied':
+                return fail('近处层高虽接近标准，但上方存在实测占用',piece,outside,True)
+            if accepted:
+                if diagnostic is not None:
+                    diagnostic['depth_primary']=True
+                    diagnostic['height_source']='近处深度层高误差不超过3厘米'
+                return ('1' if level==cell.one_z else '2'),piece,outside,False
         if depth_top:
             if diagnostic is not None:
                 diagnostic['height_source']='深度最高切片＋实测顶边支撑'
@@ -1374,6 +1410,12 @@ def _upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll
     world,xs,ys=world[own],xs[own],ys[own]
     if len(xs)<30:
         return None
+    # 上部恢复也先分离实体，不能把背景白标签与可见盒面拼成塔顶。
+    selected=_near_body_support(cell,world,depth[ys,xs],xs,ys,mask.shape,info,min_width=.12)
+    if selected is None:
+        info['reason']='上部盒面没有唯一可靠实体'
+        return None
+    world,xs,ys=world[selected],xs[selected],ys[selected]
     # 先看全部格内支撑，再匹配一/两层，不能先裁成一层。
     highest=float(np.percentile(world[:,2],98))
     state,level=min([('1',cell.one_z),('2',cell.two_z)],key=lambda item:abs(highest-item[1]))
@@ -1394,7 +1436,8 @@ def _upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll
     if _side_visibility(cell,int(xs.min()),int(xs.max()-xs.min()+1),pose,offset,pitch,
                         intr,(cell.base_z+level)/2,.35,roll)<.3:
         return None
-    if not _near_top_observed(world,xs,ys,color,depth,intr,info):
+    depth_top=_near_depth_top(world,xs,ys,depth,intr,info)
+    if not depth_top and not _near_top_observed(world,xs,ys,color,depth,intr,info):
         info['reason']='未证实真实盒顶'
         return None
     if not _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,roll,info.setdefault('upper_space',{})):
@@ -1402,7 +1445,8 @@ def _upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll
         return None
     piece=np.zeros(mask.shape,np.uint8)
     piece[ys,xs]=255
-    info.update(reason='本塔上部盒面＋真实顶边＋上方空域',layers=state)
+    info.update(reason='本塔上部盒面＋真实顶边＋上方空域',layers=state,
+                depth_primary=depth_top)
     return state,_outline(piece)
 
 
@@ -2318,7 +2362,7 @@ def _top_depth_support(values, own, xs, columns, info):
 
 
 def _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,pitch,intr,roll,level,info):
-    """远处已核验RGB盒面：背景/缺测不否决，连续前景或可靠上层占用才否决。"""
+    """远处RGB盒面必须具有本塔深度支撑；一层还需上方空域。"""
     yy=below.ravel()
     xx=np.broadcast_to(cols[:,None],below.shape).ravel()
     values=depth[yy,xx].astype(float)
@@ -2326,7 +2370,8 @@ def _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,pitch,intr,
     info['far_depth']=dict(state='unknown',points=int(good.sum()))
     evidence=info['far_depth']
     if good.sum()<30:
-        return True
+        info['rejection']='候选盒面缺少目标塔深度归属证据'
+        return False
     xx,yy,values=xx[good],yy[good],values[good]
     origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
     rays=(((xx-intr.cx)/intr.fx)[:,None]*right
@@ -2355,6 +2400,9 @@ def _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,pitch,intr,
     evidence.update(own_points=int(own.sum()),own_columns=own_coverage)
     surface=float(np.percentile(values[own],95)) if own.any() else float(np.nanmax(entered))
     info['depth_background_points']=int(np.count_nonzero(values>surface+max(.12,.03*surface)))
+    if own.sum()<30 or own_coverage<.5:
+        info['rejection']='候选盒面未获得足够本塔深度支撑'
+        return False
     if own.sum()>=30 and own_coverage>=.5:
         evidence['state']='supported'
         upper=info.setdefault('upper_space',{})
@@ -2366,13 +2414,47 @@ def _far_rgb_depth_check(cell,cols,face_rows,below,depth,pose,offset,pitch,intr,
             evidence['state']='upper_occupied'
             info['rejection']='本塔盒面和上方连续实测占用相互印证'
             return False
-        if level==cell.one_z and upper['state']=='unknown':
-            top_values=depth[face_rows[:,None]+np.arange(1,5)[None,:],cols[:,None]]
-            measured=np.isfinite(top_values)&(np.abs(top_values-float(np.median(values[own])))<.5)
-            if measured.sum()<5:
-                evidence['state']='body_only'
-                info['rejection']='一层候选仅盒身有深度，顶边及可能的上层均缺测'
-                return False
+        if level==cell.one_z and upper['state']!='clear':
+            info['rejection']='一层候选上方空域未证实'
+            return False
+    return True
+
+
+def _rgb_result_depth_check(cell,piece,state,depth,pose,offset,pitch,intr,roll,info):
+    """最终RGB结果必须有本塔实测盒面；一层还须证实上方空域。"""
+    if piece is None:
+        info['rejection']='RGB候选缺少盒面区域'
+        return False
+    region=np.zeros(depth.shape,np.uint8)
+    cv2.fillPoly(region,[np.asarray(piece,dtype=np.int32).reshape(-1,1,2)],255)
+    yy,xx=np.nonzero(region)
+    values=depth[yy,xx].astype(float)
+    good=np.isfinite(values)&(values>=_DEPTH_NEAR_M)
+    xx,yy,values=xx[good],yy[good],values[good]
+    origin,right,down,ahead=camera_frame(pose,offset,pitch,roll)
+    rays=(((xx-intr.cx)/intr.fx)[:,None]*right
+          +((yy-intr.cy)/intr.fy)[:,None]*down+ahead)
+    world=origin+values[:,None]*rays
+    x0,x1,y0,y1=cell.search_bounds(MARGIN_M)
+    level=cell.one_z if state=='1' else cell.two_z
+    own=((world[:,0]>=x0)&(world[:,0]<=x1)&(world[:,1]>=y0)&(world[:,1]<=y1)
+         &(world[:,2]>=cell.base_z-.05)&(world[:,2]<=level+.08))
+    columns=np.nonzero(region)[1]
+    coverage=len(np.unique(xx[own]))/max(1,len(np.unique(columns)))
+    info.update(own_points=int(own.sum()),own_columns=float(coverage))
+    if own.sum()<30 or coverage<.5:
+        info['rejection']='RGB盒面缺少本塔空间归属证据，需换位确认'
+        return False
+    entered=_enter_depth(origin,rays,x0,x1,y0,y1)
+    foreground=np.isfinite(entered)&(values<entered-.12)
+    front_coverage=len(np.unique(xx[foreground]))/max(1,len(np.unique(columns)))
+    if foreground.sum()>=30 and foreground.mean()>=.2 and front_coverage>=.5:
+        info['rejection']='RGB盒面含连续前景，禁止轮廓回退'
+        return False
+    if state=='1' and not _upper_space_clear(cell,level,pose,offset,pitch,intr,depth,
+                                             roll,info.setdefault('upper_space',{})):
+        info['rejection']='一层候选上方空域未证实，禁止将两层降为一层'
+        return False
     return True
 
 
@@ -2583,6 +2665,10 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
                 if any(continued):
                     continue
                 relative=min((1,2),key=lambda n:abs(height-.35*n))
+                if (depth is not None and relative==1 and state=='2'
+                        and abs(bottom_z-cell.base_z)>.10):
+                    # 高处可见35cm可能只是上层或遮挡，不能据此缩成一层。
+                    continue
                 if abs(height-.35*relative)<=.065:
                     bottom_evidence.append((support,relative,height,bottom_z))
             if bottom_evidence:
@@ -2651,6 +2737,9 @@ def _rgb_white_top(cell,color,white,mask,pose,offset,pitch,intr,z_cam,roll=0.,di
             if not _rgb_upper_consistent(cell,level,pose,offset,pitch,intr,depth,roll,
                                       check.setdefault('upper_space',{})):
                 check['rejection']='上方空间存在实测占用'
+                continue
+            if state=='1' and check['upper_space'].get('state')!='clear':
+                check['rejection']='一层候选上方空域未证实'
                 continue
             if check['upper_space'].get('state')=='unknown':
                 top_values=depth[face_rows[:,None]+np.arange(1,5)[None,:],cols[:,None]]
@@ -2969,6 +3058,23 @@ def _classify_cell(
         if conclusion is None and view_distance<1.1 and needs_pitch:
             diagnostic['needs_standoff'] = True
             shown_reason = '近处竖直视野不足：先调整俯仰，仍无法看全时后退换位；' + (reason or '')
+        if conclusion in ('1','2') and method in (
+                'RGB局部盒面','RGB盒体边界','RGB接缝仲裁','彩色','黄地','远处') and depth is not None:
+            # 所有RGB回退共享归属检查，不能由另一个轮廓分支绕过拒绝。
+            verification=diagnostic.setdefault('rgb_final_depth',{})
+            if not _rgb_result_depth_check(cell,piece,conclusion,depth,pose,offset,
+                                           pitch,intr,roll,verification):
+                conclusion,piece,method,hold,skip=None,None,None,False,True
+                diagnostic['needs_parallax']=True
+                shown_reason=verification['rejection']
+        if conclusion=='1' and blocked and method in (
+                'RGB局部盒面','RGB盒体边界','RGB接缝仲裁','彩色','黄地','远处'):
+            # 已知高台遮住一层时，背景横线不能借RGB补判覆盖可见性。
+            # 实测上部盒面/深度路径仍可证明局部可见，不受此RGB限制。
+            conclusion,piece,method,hold,skip=None,None,None,False,True
+            diagnostic['rgb_visibility_rejected']=True
+            diagnostic['needs_parallax']=True
+            shown_reason='一层被高台遮挡：RGB局部盒面不能证明目标可见，需换位确认'
         diagnostic['white_reading'] = dict(
             result=conclusion if conclusion in ('1', '2') else None,
             method=method, reason=reason)
@@ -2991,6 +3097,34 @@ def _classify_cell(
                 and not diagnostic.get('cap_blocks_white')):
             detail = diagnostic.get("far_white", {}).get("reason", "证据不足，需要侧向视角")
             shown_reason = detail + (("；" + reason) if reason else "")
+        risk = observation_risk(cell, pose.x, pose.y)
+        if risk:
+            # 6号底线柜子规则只拦1层；1号纸板规则仍只干预0/1层。
+            bottom_six = cell.name == tower_cells()[5].name
+            restricted = ('1',) if bottom_six else ('0', '1')
+            scope = '1层' if bottom_six else '0/1层'
+            rejected = conclusion in restricted and (
+                bottom_six or method not in ('深度', '上部盒面', '远处白盒')
+                or blocked or not in_view)
+            diagnostic['view_risk'] = dict(reason=risk, rejected=rejected,
+                candidate=conclusion, method=method)
+            if rejected:
+                conclusion, piece, method, hold, skip = None, None, None, False, True
+                diagnostic['needs_parallax'] = True
+                shown_reason = risk + f'；{scope}候选禁止确认，请换位观察'
+            if rejected:
+                action = f'{scope}禁止确认，换位观察'
+            elif bottom_six and conclusion == '0':
+                action = '0层不受本约束影响，保留原判断'
+            elif conclusion == '2':
+                action = '两层不受本约束影响，保留原判断'
+            elif conclusion in ('红', '蓝'):
+                action = '顶块不受本约束影响，保留原判断'
+            elif conclusion is None:
+                action = f'仅约束{scope}，当前待识别'
+            else:
+                action = '本塔深度证据通过，保留原判断'
+            diagnostic['view_risk']['action'] = action
         diagnostic.pop('_cap_allowed',None)
         diagnostic.pop('_cap_suspected_allowed',None)
         return CellView(
@@ -3055,7 +3189,8 @@ def _classify_cell(
     if side_white and depth is None and rgb_structure is None and z_cam>.2:
         rgb_structure=_rgb_white_edges(cell,color,white,mask,pose,offset,pitch,
                                        intr,z_cam,roll,diagnostic)
-    if occludes or blocked or side_white:
+    if occludes or blocked or side_white or (
+            near_depth_result is not None and near_depth_result[0] is None):
         partial=_upper_white_reading(cell,color,white,depth,mask,pose,offset,pitch,intr,roll,diagnostic)
         if partial is not None:
             state,piece=partial

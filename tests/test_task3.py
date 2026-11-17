@@ -558,14 +558,14 @@ def test_box_in_front_of_the_tower_is_not_a_layer():
     assert "前面有东西挡住了" in "\n".join(watch.window_lines("extend"))
 
 
-def test_missing_depth_allows_color_but_measured_foreground_blocks_it():
+def test_missing_depth_and_measured_foreground_both_block_rgb_confirmation():
     _, pose, offset = _basic()
     cell = _cell("右侧地面远一格")
     color = _blank()
     _paint(color, pose, 0.0, cell, 0.35, 0.35, 0.0, (255, 255, 255), offset=offset)
     depth = np.full(color.shape[:2], np.nan, dtype=np.float32)
     views = inspect_frame(pose, offset, 0.0, INTR, color, depth)
-    assert views[cell.name].conclusion == "1"
+    assert views[cell.name].conclusion is None
     depth[:] = 1.0
     views = inspect_frame(pose, offset, 0.0, INTR, color, depth)
     assert views[cell.name].conclusion is None
