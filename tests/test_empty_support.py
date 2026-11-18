@@ -32,7 +32,7 @@ def test_empty_ignores_invalid_one_pixel_boundary():
     assert _empty_evidence(cell,pose,offset,pitch,intr,depth)
 
 
-def test_empty_rejects_concentrated_missing_depth():
+def test_empty_allows_half_missing_one_quadrant():
     cell,pose,offset,pitch,intr,depth,patch,rays,origin = support_scene()
     floor = origin + rays*depth[...,None]
     x0,x1,y0,y1 = cell.search_bounds(0.)
@@ -40,6 +40,8 @@ def test_empty_rejects_concentrated_missing_depth():
     yy,xx = np.nonzero(region)
     # 丢失一个分区约一半的深度，总体仍超过80%。
     depth[yy[::2],xx[::2]] = np.nan
+    assert _empty_evidence(cell,pose,offset,pitch,intr,depth)
+    depth[region]=np.nan
     assert not _empty_evidence(cell,pose,offset,pitch,intr,depth)
 
 
@@ -59,4 +61,11 @@ def test_empty_tolerates_isolated_depth_spike():
     yy,xx = np.nonzero(patch)
     cy,cx = int(np.median(yy)),int(np.median(xx))
     depth[cy,cx] = (cell.base_z+.08-origin[2])/rays[cy,cx,2]
+    assert _empty_evidence(cell,pose,offset,pitch,intr,depth)
+
+
+def test_empty_relaxed_height_and_scattered_missing():
+    cell,pose,offset,pitch,intr,depth,patch,rays,origin = support_scene()
+    depth=((cell.base_z+.04-origin[2])/rays[:,:,2]).astype(np.float32)
+    depth[:,::4]=np.nan
     assert _empty_evidence(cell,pose,offset,pitch,intr,depth)

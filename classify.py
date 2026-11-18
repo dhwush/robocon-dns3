@@ -3331,6 +3331,12 @@ def _classify_cell(
         reason = "前面有东西挡住了或格内有物体：不能确认为空点"
         # 框里有一块像塔的箱子，或柱体里已经有东西。没有合格白盒也不能写成空。
         return pack(None, frac, mean_v, skip=True)
+    if z_cam > _DEPTH_FAR_M:
+        far_empty = _far_empty_candidate(cell,pose,offset,pitch,intr,color,depth,mask,roll)
+        diagnostic['far_empty'] = far_empty
+        if far_empty['candidate']:
+            reason = '疑似0层：远处底面证据，需停稳累计后靠近或换位确认'
+            return pack(None, frac, mean_v, skip=True)
     if not _empty_evidence(cell, pose, offset, pitch, intr, depth, roll):
         reason = ((reason + "；") if reason else "") + (
             "空点未证实：支撑面未完整入画、深度不足或高度不符"
@@ -3339,7 +3345,53 @@ def _classify_cell(
     return pack("0", frac, mean_v, method=_color_method(mask, floor))
 
 
-def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
+def _far_empty_candidate(cell,pose,offset,pitch,intr,color,depth,mask,roll=0.):
+    """远处仅生成待确认空点；不把缺少其它类别结果当作空点证据。"""
+    info = dict(candidate=False,source=None)
+    verts=[project(np.array([x,y,cell.base_z]),pose,offset,pitch,intr,roll)
+           for x,y in ((cell.x-cell.foot/2,cell.y-cell.foot/2),
+                       (cell.x+cell.foot/2,cell.y-cell.foot/2),
+                       (cell.x+cell.foot/2,cell.y+cell.foot/2),
+                       (cell.x-cell.foot/2,cell.y+cell.foot/2))]
+    if any(v is None or not _inside(v,intr) for v in verts):
+        return info
+    patch=np.zeros(color.shape[:2],np.uint8)
+    cv2.fillConvexPoly(patch,np.round(verts).astype(np.int32),255)
+    floor=cv2.erode(patch,np.ones((3,3),np.uint8))>0
+    if np.count_nonzero(floor)<30:
+        return info
+    # 搜索区域有成片白盒或红蓝色时不能因其它分支失败而转为空点。
+    hsv=cv2.cvtColor(color,cv2.COLOR_BGR2HSV)
+    red,blue=_cap_colors(color)
+    tower_pixels=(_white_mask(color)>0)|red|blue
+    info['tower_fraction']=float(np.mean(tower_pixels[mask>0])) if np.any(mask) else 1.
+    if info['tower_fraction']>.03:
+        return info
+    if _empty_evidence(cell,pose,offset,pitch,intr,depth,roll,max_depth=6.):
+        info.update(candidate=True,source='远距实测底面')
+        return info
+    if depth is not None:
+        measured=depth[floor]
+        usable=np.isfinite(measured)&(measured>=.3)
+        if usable.mean()>=.30:
+            info['depth_rejection']='有实测深度但未证明平坦底面，不用RGB绕过'
+            return info
+    # 纯RGB只给弱候选：底面应有可辨颜色、与周边支撑面相似且无明显纹理边界。
+    ring=(cv2.dilate(patch,np.ones((9,9),np.uint8))>0)&(patch==0)
+    if np.count_nonzero(ring)<30:
+        return info
+    samples=hsv[floor].astype(float);reference=np.median(hsv[ring],axis=0)
+    hue=np.abs(samples[:,0]-reference[0]);hue=np.minimum(hue,180-hue)
+    match=(hue<=10)&(np.abs(samples[:,1]-reference[1])<=35)&(np.abs(samples[:,2]-reference[2])<=40)
+    edges=cv2.Canny(cv2.cvtColor(color,cv2.COLOR_BGR2GRAY),30,80)>0
+    info.update(surface_match=float(match.mean()),edge_fraction=float(edges[floor].mean()))
+    if (np.median(samples[:,1])>=35 and np.median(samples[:,2])>=50
+            and match.mean()>=.85 and edges[floor].mean()<.05):
+        info.update(candidate=True,source='RGB底面与周边一致（弱证据）')
+    return info
+
+
+def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0, *, max_depth=3.0) -> bool:
     """在台面投影内部看到覆盖充分的空支撑面，才确认空点。"""
     if depth is None or depth.shape != (intr.height, intr.width):
         return False
@@ -3355,7 +3407,7 @@ def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
         return False
     # 先检查完整投影中的连续凸起，不能让内缩或总体占比掩盖小物体。
     values = depth[ys, xs]
-    valid = np.isfinite(values) & (values >= _DEPTH_NEAR_M) & (values <= _DEPTH_FAR_M)
+    valid = np.isfinite(values) & (values >= _DEPTH_NEAR_M) & (values <= max_depth)
     origin, right, down, ahead = camera_frame(pose, offset, pitch, roll)
     world = (origin + ((xs-intr.cx)*values/intr.fx)[:,None]*right
              + ((ys-intr.cy)*values/intr.fy)[:,None]*down + values[:,None]*ahead)
@@ -3371,15 +3423,15 @@ def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
         points = world[raised][labels[ys[raised], xs[raised]] == index]
         if np.max(np.ptp(points[:,:2], axis=0)) >= .04:
             return False
-    # 剔除一像素边缘带；整体覆盖率与高度门槛保持原值。
+    # 剔除一像素边缘带；允许分散缺测，但仍检查各区与连续凸起。
     inner = cv2.erode(patch, np.ones((3,3), np.uint8),
                       borderType=cv2.BORDER_CONSTANT, borderValue=0)
     keep = inner[ys,xs] > 0
     if keep.sum() < 30:
         return False
     ys, xs, values, valid, world = (a[keep] for a in (ys,xs,values,valid,world))
-    support = valid & (np.abs(world[:,2]-cell.base_z) <= .03)
-    if valid.mean() < .80 or support.sum()/max(1, valid.sum()) < .95:
+    support = valid & (np.abs(world[:,2]-cell.base_z) <= .05)
+    if valid.mean() < .70 or support.sum()/max(1, valid.sum()) < .90:
         return False
     # 按预期底面坐标分四区，避免深度空洞集中在某一区仍判空。
     rays = (((xs-intr.cx)/intr.fx)[:,None]*right
@@ -3390,9 +3442,9 @@ def _empty_evidence(cell, pose, offset, pitch, intr, depth, roll=0.0) -> bool:
     quadrants = (floor[:,0] >= (x0+x1)/2).astype(int) + 2*(floor[:,1] >= (y0+y1)/2)
     for quadrant in range(4):
         region = quadrants == quadrant
-        if region.sum() < 5 or valid[region].mean() < .65:
+        if region.sum() < 5 or valid[region].mean() < .45:
             return False
-        if support[region].sum()/max(1,valid[region].sum()) < .90:
+        if support[region].sum()/max(1,valid[region].sum()) < .85:
             return False
     return True
 

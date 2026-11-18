@@ -52,6 +52,36 @@ def stabilize_local_rgb(views, tracks, camera=None):
         view.measurements['rgb_local_track']=dict(candidate=view.conclusion,frames=count)
 
 
+def accumulate_empty_candidates(views, tracks, pose, pitch, roll, now, settled):
+    """同一停稳视角累计疑似空点，2秒/6个不同时间采样后请求换位，绝不直接锁0。"""
+    camera=(pose.x,pose.y,pose.yaw,pitch,roll)
+    for name,view in views.items():
+        info=(view.measurements or {}).get('far_empty',{})
+        if (not settled or not info.get('candidate') or view.conclusion is not None
+                or (view.measurements or {}).get('cap_blocks_white')):
+            tracks.pop(name,None)
+            continue
+        previous=tracks.get(name)
+        if (previous is None or now-previous['last']>1.5 or now<previous['last']
+                or math.hypot(camera[0]-previous['camera'][0],camera[1]-previous['camera'][1])>.02
+                or abs(math.remainder(camera[2]-previous['camera'][2],2*math.pi))>math.radians(1)
+                or abs(pitch-previous['camera'][3])>1 or abs(roll-previous['camera'][4])>1):
+            previous=dict(start=now,last=now,count=0,camera=camera)
+        if now>previous['last'] or previous['count']==0:
+            previous['count']+=1
+            previous['last']=now
+        tracks[name]=previous
+        duration=now-previous['start']
+        info.update(samples=previous['count'],duration_s=duration)
+        ready=duration>=2 and previous['count']>=6
+        view.skip_vote=True
+        view.reason=(f"疑似0层：{previous['count']}次/{duration:.1f}秒；"+
+                     ('远处证据已稳定，请靠近或换位确认' if ready else '等待停稳累计，不直接确认'))
+        if ready:
+            view.needs_parallax=True
+            view.measurements['needs_parallax']=True
+
+
 LEVELS = ("bright", "daylight", "indoor", "dim", "dark")
 LIGHT_WORDS = {
     "bright": "很亮",
@@ -212,6 +242,7 @@ class FieldWatch:
         self.stability_reason='等待有效采样'
         self.parallax_origins = {}
         self.local_rgb_tracks = {}
+        self.empty_candidate_tracks = {}
         self.autonomy = None
 
     def enable_autonomy(self, clock=None):
@@ -292,6 +323,7 @@ class FieldWatch:
             self.stable_pitch = self.pitch
             self.stable_frames = 0
             self.local_rgb_tracks.clear()
+            self.empty_candidate_tracks.clear()
             for vote in self.votes.values():
                 vote.on_move()
         else:
@@ -305,28 +337,25 @@ class FieldWatch:
         if self.autonomy is not None and self.autonomy.stop_until is not None:
             preparing = True
         if reused:
-            # 缓存位姿只能延续此前已经证实的停稳，不能制造新停稳或确认移动到位。
-            self.camera_settled = bool(self.camera_settled and valid and not preparing
-                and self.held_pitch is not None and self.held_roll is not None
-                and abs(self.pitch-self.held_pitch)<=1.
-                and abs(self.roll-self.held_roll)<=1.)
-            if not self.camera_settled:
-                self.camera_stability.reset()
-                self.stability_after_stamp=max(getattr(self,'stability_after_stamp',float('-inf')),
-                                              getattr(self,'pose_frame_stamp',pose.stamp))
+            # 同步暂缺只暂停确认，不清掉真实采样历史，也不推进采样水位。
+            self.camera_settled = False
         elif samples is not None:
-            self.camera_stability.reset()
             after = getattr(self,'stability_after_stamp',float('-inf'))
-            for sampled,pitch,roll,sampled_at in samples:
-                if sampled.stamp >= after:
-                    self.camera_stability.update(sampled,pitch,roll,sampled_at,valid=valid)
-            self.camera_settled = (valid and self.camera_stability.settled
+            for sampled,pitch,roll,sampled_at in sorted(samples,key=lambda q:q[0].stamp):
+                if sampled.stamp < after:
+                    continue
+                if (self.camera_stability.last_stamp is not None
+                        and sampled.stamp <= self.camera_stability.last_stamp):
+                    continue
+                self.camera_stability.update(sampled,pitch,roll,sampled_at,valid=valid)
+            self.camera_settled = (valid and bool(samples) and self.camera_stability.settled
                                    and self.camera_stability.last_stamp is not None
                                    and abs(pose.stamp-self.camera_stability.last_stamp) <= .15)
             if self.camera_settled:
                 self.stable_frames = max(self.stable_frames,self.camera_stability.samples)
         else:
             self.camera_settled = self.camera_stability.update(pose,self.pitch,self.roll,now,valid=valid)
+        self.confirmation_allowed = valid and not reused and self.camera_settled
         if not reused and self.camera_settled:
             self.held_pitch,self.held_roll=self.pitch,self.roll
         self.stability_reason=self.camera_stability.reason
@@ -337,10 +366,7 @@ class FieldWatch:
         elif self.camera_stability.settled and not self.camera_settled:
             self.stability_reason='当前位姿与停稳采样时间偏差超过0.15秒'
         if reused:
-            self.stability_reason=('沿用上一有效位姿，保持此前停稳状态' if self.camera_settled
-                                   else '沿用上一有效位姿，移动后须等待新雷达数据验证停稳')
-        if self.live_motion_guard and (preparing or not self.camera_settled):
-            color = depth = None
+            self.stability_reason='沿用上一有效位姿：本帧仅预览，等待新匹配数据确认'
         self.last_pose = pose
         self.have_color = color is not None
         self.views = inspect_frame(
@@ -354,6 +380,8 @@ class FieldWatch:
         )
         stabilize_local_rgb(self.views,self.local_rgb_tracks,
                             (pose.x,pose.y,pose.yaw,self.pitch,self.roll))
+        accumulate_empty_candidates(self.views,self.empty_candidate_tracks,pose,self.pitch,
+                                    self.roll,now,self.camera_settled)
         # 请求侧向观察时记住原始光心，不让移动途中的新帧不断移动视差基准。
         if color is not None:
             from car_pose import camera_position
@@ -379,7 +407,8 @@ class FieldWatch:
         if self.autonomy is not None:
             self.autonomy.update()
             return
-        if color is not None and self.stable_frames >= OBS_STABLE_FRAMES:
+        if (color is not None and self.stable_frames >= OBS_STABLE_FRAMES
+                and getattr(self,'confirmation_allowed',False) and not preparing):
             for name, view in self.views.items():
                 if view.skip_vote:
                     continue

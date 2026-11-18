@@ -33,7 +33,7 @@ def make_survey(monkeypatch):
         votes={n: Vote() for n in DISPLAY}, _arrived=lambda action: True)
     monkeypatch.setattr(autonomous, 'fits_when_aimed', lambda cell, *args: cell.name == name)
     monkeypatch.setattr(autonomous, 'fits_rgb_when_aimed', lambda *args: False)
-    monkeypatch.setattr(autonomous, 'nearest_observation', lambda *args: Action('blocked', '无安全位置'))
+    monkeypatch.setattr(autonomous, 'nearest_observation', lambda *args, **kwargs: Action('blocked', '无安全位置'))
     def aim(n, v, p, o, pitch, color, intr, attempt, targets=None):
         if attempt == 1 and abs(pitch-8.) > 1:
             return Action('pitch', '抬头到8度', pitch=8., cell=n, attempt=1)
@@ -1114,7 +1114,7 @@ def test_explicit_fallback_goal_can_use_its_own_result(monkeypatch):
     assert survey.complete
 
 
-def test_initial_route_is_cached_and_adds_middle_distance_only_after_last_stop(monkeypatch):
+def test_initial_route_is_cached_then_enters_final_fallback(monkeypatch):
     from motion import RouteStop, RouteStops, Look
     _, watch, clock, _ = make_survey(monkeypatch)
     survey = AutonomousSurvey(watch, clock)
@@ -1141,11 +1141,11 @@ def test_initial_route_is_cached_and_adds_middle_distance_only_after_last_stop(m
         survey._schedule(clock())
         if i == 0:
             assert len(calls) == 1  # 第二站沿用初始路线。
-    assert len(calls) == 2
-    assert calls[-1]['medium_only'] is True
-    assert calls[-1]['max_stops'] == 2
-    assert all(watch.votes[n].locked is None for n in calls[-1]['pending'])
-    assert len(survey.additional_stops) == 1
+    assert len(calls) == 1  # 既定路线结束后进入最终靠近/补偿，而非无限追加中距点。
+    assert survey.final_fallback
+    assert survey.action.kind == 'blocked'  # 此测试planner无安全姿态，不能凭空填0。
+    assert not survey.fallback_zero
+    assert len(survey.additional_stops) == 0
     assert len(survey.primary_stops) == 3
 
 

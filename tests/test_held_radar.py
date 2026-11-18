@@ -1,4 +1,4 @@
-"""缓存位姿可延续静止识别，不能伪造移动后停稳。"""
+"""缓存位姿仅预览，不清除真实历史，也不能确认新结果。"""
 from types import SimpleNamespace
 import numpy as np
 import pytest
@@ -36,7 +36,7 @@ def test_loss_continues_on_last_real_pose_without_new_settle_samples(monkeypatch
         clock[0]=t
         w.stability_samples=[]
         w.update(p,c,None)
-        assert w.camera_settled
+        assert not w.camera_settled and not w.confirmation_allowed
         assert seen[-1] is c
         assert w.last_pose is p and w.last_pose.stamp==.7
         assert w.camera_stability.samples==samples
@@ -50,12 +50,12 @@ def test_motion_then_loss_requires_fresh_settling(monkeypatch,kind):
     w.hold=SimpleNamespace(kind=kind)
     clock[0]=1.
     w.update(p,c,None)
-    assert not w.camera_settled and seen[-1] is None
+    assert not w.camera_settled and seen[-1] is c
     w.hold=None
     for t in (1.2,1.4,1.6):
         clock[0]=t
         w.update(p,c,None)
-        assert not w.camera_settled and seen[-1] is None
+        assert not w.camera_settled and seen[-1] is c
     w.pose_reused=False
     for t in (2.,2.2,2.4,2.6):
         clock[0]=t
@@ -69,11 +69,11 @@ def test_imu_change_during_loss_stops_recognition_until_fresh_pose(monkeypatch):
     w.pitch=3.
     clock[0]=1.
     w.update(w.last_pose,c,None)
-    assert not w.camera_settled and seen[-1] is None
+    assert not w.camera_settled and seen[-1] is c
     w.pitch=0.
     clock[0]=1.2
     w.update(w.last_pose,c,None)
-    assert not w.camera_settled and seen[-1] is None
+    assert not w.camera_settled and seen[-1] is c
 
 
 def test_never_settled_cannot_settle_on_repeated_cached_pose(monkeypatch):
@@ -83,4 +83,4 @@ def test_never_settled_cannot_settle_on_repeated_cached_pose(monkeypatch):
     for t in (1.,1.2,1.4,1.6):
         clock[0]=t
         w.update(w.last_pose,c,None)
-        assert not w.camera_settled and seen[-1] is None
+        assert not w.camera_settled and seen[-1] is c

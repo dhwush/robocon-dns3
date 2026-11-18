@@ -223,6 +223,11 @@ def paint_window(color, views, locked: dict, texts: list[str], show_boxes: bool 
                     tags.append((max(0, x), max(0, y - 24),
                                  f"{TOWER_NO[name]} 搜索框", bgr))
             measure = getattr(view, "measurements", None) or {}
+            empty = measure.get('far_empty', {})
+            if empty.get('candidate') and view.region is not None:
+                ex, ey, _, _ = cv2.boundingRect(view.region)
+                tags.append((max(0, ex), max(0, ey + 48),
+                             f"{TOWER_NO[name]}号 {view.reason or '疑似0层，需确认'}", (0, 220, 255)))
             risk = measure.get('view_risk')
             if risk and view.region is not None:
                 rx, ry, _, _ = cv2.boundingRect(view.region)
@@ -688,7 +693,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             lines = watch.lines(result_mode)
             shown = watch.window_lines(result_mode)
             if watch.pose_reused:
-                shown = list(shown) + ['雷达暂无匹配新数据：沿用上一有效位姿；移动及停稳验证期间不识别']
+                shown = list(shown) + ['雷达暂无匹配新数据：沿用上一有效位姿；当前仅预览，等待新匹配数据确认']
             text = "\n".join(shown)
             if dashboard is not None:
                 # 识别画面可能较旧；面板优先读取此刻有效的雷达与IMU反馈。
@@ -698,7 +703,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
                     live_pitch = pitch_from_gravity(live_gravity)
                 if dashboard.notice == '等待定位与画面同步，暂停识别和移动；恢复后自动继续':
                     dashboard.notice=''
-                held_notice='雷达暂无匹配新数据：沿用上一有效位姿；移动及停稳验证期间不识别'
+                held_notice='雷达暂无匹配新数据：沿用上一有效位姿；当前仅预览，等待新匹配数据确认'
                 if watch.pose_reused:
                     dashboard.show(watch,live_pose,live_pitch,notice=held_notice)
                 else:

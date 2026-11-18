@@ -75,7 +75,7 @@ def terminal_results(watch):
     from field_map import DISPLAY
     rows=[]
     for number,name in enumerate(DISPLAY,1):
-        view=(watch.views or {}).get(name)
+        view=(getattr(watch,'views',None) or {}).get(name)
         state=None if view is None else view.conclusion
         vote=watch.votes[name]
         confirmed=vote.locked if not vote.recheck else None
@@ -161,13 +161,34 @@ def terminal_status(watch,pose,pitch):
         rows += ['最终观测位置：等待起点确认' if awaiting else '最终观测位置：当前起点' ,'本站观察：仅尚未确认的塔']
     confirmed={n:v.locked for n,v in watch.votes.items() if v.locked is not None and not v.recheck}
     rows.append('已确认：'+('；'.join(TOWER_NO[n]+'号='+str(confirmed[n]) for n in DISPLAY if n in confirmed) or '无'))
+    inferred=getattr(survey,'fallback_zero',{})
+    if inferred:
+        rows.append('兜底推定0层（非识别确认）：'+'、'.join(TOWER_NO[n]+'号' for n in DISPLAY if n in inferred))
     rows.append('待确认：'+('、'.join(TOWER_NO[n]+'号' for n in DISPLAY if n not in confirmed) or '无'))
     rows.append('提示：'+getattr(survey,'message','等待观察任务'))
+    gate=getattr(watch,'camera_stability',None)
+    if gate is not None:
+        state=gate.summary()
+        rows.append(f"停稳检查：{state['samples']}/3次；{state['duration_s']:.1f}/0.6秒；"
+                    +getattr(watch,'stability_reason',state['reason']))
+    for number,name in enumerate(DISPLAY,1):
+        view=(getattr(watch,'views',None) or {}).get(name)
+        if view is None:
+            continue
+        value=view.conclusion or '未知'
+        locked_value=watch.votes[name].locked
+        status=('已确认='+locked_value if locked_value is not None else
+                '等待停稳/新数据确认' if not getattr(watch,'confirmation_allowed',True) or holding else
+                '等待到达观测姿态' if action is not None and action.kind in ('move','yaw','pitch') else
+                '等待有效识别' if view.conclusion is None else '等待确认条件')
+        rows.append(f'{number}号：本帧={value}；{status}')
     rows.append('命令：b 开始 | c 确认当前结果 | 1–5 光线 | n 切塔 | d 诊断 | s 保存 | q 退出')
     if complete:
         rows += ['最终汇总：']+[f'{TOWER_NO[n]}号：{confirmed.get(n,"未确认")}' for n in DISPLAY]
     key=(phase,getattr(action,'kind',None),tuple(confirmed.items()),
-         getattr(goal,'observation_x',None),getattr(goal,'observation_y',None))
+         getattr(goal,'observation_x',None),getattr(goal,'observation_y',None),
+         getattr(watch,'confirmation_allowed',None),
+         tuple((n,getattr(v,'conclusion',None)) for n,v in (getattr(watch,'views',None) or {}).items()))
     return rows,key,confirmed
 
 

@@ -112,6 +112,12 @@ class AutonomousSurvey:
         self.distance_pose = watch.last_pose
         self.stop_until = None
         self.stop_message = ""
+        self.final_fallback = False
+        self.fallback_zero = {}
+        self.final_goal_names = ()
+        self.final_valid_start = None
+        self.final_valid_last = None
+        self.final_valid_samples = 0
 
     def wait_for_start(self):
         """模式2/3先浏览实时姿态，按B才建立本轮起点。"""
@@ -140,7 +146,7 @@ class AutonomousSurvey:
         if hasattr(watch,'camera_stability'):
             watch.camera_stability.reset()
             watch.camera_settled = False
-        for attr in ('local_rgb_tracks', 'parallax_origins'):
+        for attr in ('local_rgb_tracks', 'parallax_origins', 'empty_candidate_tracks'):
             if hasattr(watch, attr):
                 getattr(watch, attr).clear()
         self.__init__(watch, self.clock, stationary_scan=self.stationary_scan)
@@ -151,7 +157,8 @@ class AutonomousSurvey:
 
     def _camera_ready(self):
         return (self.watch.stable_frames >= OBS_STABLE_FRAMES
-                and getattr(self.watch,'camera_settled',True))
+                and getattr(self.watch,'camera_settled',True)
+                and getattr(self.watch,'confirmation_allowed',True))
 
     def confirmation_target(self):
         action = self.action
@@ -370,6 +377,15 @@ class AutonomousSurvey:
             words = {'move': '本段移动到位', 'yaw': '完成旋转', 'pitch': '俯仰到位'}
             self.stop_message = words[action.kind] + '，可以了，停止！保持车身和相机不动，等待稳定'
             self.stop_until = now + STOP_HOLD_SECONDS
+            # 到位后的新采样单独验证停稳；只在进入停止等待时重置一次。
+            watch = self.watch
+            if hasattr(watch, 'camera_stability'):
+                watch.camera_stability.reset()
+                watch.camera_settled = False
+                watch.confirmation_allowed = False
+                watch.stability_after_stamp = max(getattr(watch,'stability_after_stamp',float('-inf')),
+                                                  watch.last_pose.stamp)
+
         if now < self.stop_until or not self._camera_ready():
             for evidence in self.evidence.values():
                 evidence.clear()
@@ -441,6 +457,8 @@ class AutonomousSurvey:
             for evidence in self.evidence.values():
                 evidence.clear()
         if not watch.have_color or not self._camera_ready():
+            self.final_valid_start = self.final_valid_last = None
+            self.final_valid_samples = 0
             for evidence in self.evidence.values():
                 evidence.clear()
             gate=getattr(watch,'camera_stability',None)
@@ -461,6 +479,12 @@ class AutonomousSurvey:
             self._advance_observation()
             if self.action is not None and self.action.kind != 'wait':
                 return
+        if self.final_goal_names and self.action is not None and self.action.kind == 'wait':
+            if self.final_valid_last is None or now-self.final_valid_last > .5:
+                self.final_valid_start, self.final_valid_samples = now, 0
+            if self.final_valid_last != now:
+                self.final_valid_samples += 1
+            self.final_valid_last = now
         if not self.stationary_scan and not self.observations and not self.complete:
             visible = [n for n,v in watch.views.items() if v.in_view and not v.needs_yaw and not v.needs_pitch]
             self._note_observation(visible, now)
@@ -501,6 +525,27 @@ class AutonomousSurvey:
         if self.look_key is None or self.look_started is None:
             return False
         name, attempt = self.look_key
+        if self.final_goal_names:
+            # 兜底只消费真实到位后的连续有效观察，不能用移动/丢帧等待时间顶替。
+            if (not self.watch.have_color or not self._camera_ready()
+                    or self.final_valid_start is None or self.final_valid_last is None
+                    or now-self.final_valid_last > .5
+                    or now-self.final_valid_start < POINT_LOOK_SECONDS
+                    or self.final_valid_samples < MIN_SAMPLES):
+                return False
+            for target in self.final_goal_names:
+                vote = self.watch.votes[target]
+                if vote.locked is None:
+                    vote.locked, vote.recheck, vote.ready = '0', False, False
+                    self.fallback_zero[target] = '最终靠近/补偿观测后仍无结果，兜底推定0层'
+                    self._record(target, 'fallback_zero', '0', now)
+            self.final_goal_names = ()
+            self.final_valid_start = self.final_valid_last = None
+            self.final_valid_samples = 0
+            self.observation_goal = None
+            self.action = None
+            self.look_key = self.look_started = None
+            return True
         elapsed = now - self.look_started
         progress = self.evidence[name].windows
         if not self.stationary_scan:
@@ -526,6 +571,34 @@ class AutonomousSurvey:
         self.look_key = self.look_started = None
         self.action = None
         return True
+
+    def _plan_final_observation(self, pending, now):
+        """先尝试换到可达观察点；不能靠近时用允许原地的补偿视角。"""
+        watch = self.watch
+        name = pending[0]
+        args = (watch.last_pose, watch.setup.center_to_corner, watch.intr, [name])
+        goal = nearest_observation(*args, pitch=watch.pitch, require_move=True,
+                                   failed=self.failed_observations)
+        compensated = False
+        if goal.observation_yaw is None:
+            compensated = True
+            goal = nearest_observation(*args, pitch=watch.pitch, require_move=False,
+                                       failed=())
+        if goal.observation_yaw is None:
+            self.action = Action('blocked', '没有安全靠近或补偿姿态，停止并等待有效观察条件')
+            self.blocked_until = now+5.
+            self.message = self.action.text
+            return
+        self.final_goal_names = tuple(goal.cells or (name,))
+        self.final_valid_start = self.final_valid_last = None
+        self.final_valid_samples = 0
+        self.observation_goal = replace(goal, observation_fallback=True)
+        self.look_key = self.look_started = None
+        self._record(name, 'fallback_compensation' if compensated else 'fallback_approach', None, now)
+        self._advance_observation()
+        if self.action is not None and self.action.kind == 'wait':
+            self.look_key, self.look_started = (name,0), now
+        self.message = ('最终补偿观测' if compensated else '最终靠近观测') + '：停稳有效观察后仍无结果，输出0层（兜底推定）'
 
     def _schedule(self, now):
         if self.awaiting_start:
@@ -555,7 +628,11 @@ class AutonomousSurvey:
             self.observation_goal = None
             self.look_key = self.look_started = None
             self.action = Action("stop", "停止！全部区域已自动确认")
-            self.message = "停止！全部区域已自动确认，保持车身和相机不动"
+            self.message = ("停止！全部区域已有输出（含兜底推定0层），保持车身和相机不动"
+                            if self.fallback_zero else "停止！全部区域已自动确认，保持车身和相机不动")
+            return
+        if self.final_fallback and self.observation_goal is None:
+            self._plan_final_observation(pending, now)
             return
         if self._advance_observation():
             if self.action is not None and self.action.kind == 'wait':
@@ -591,15 +668,10 @@ class AutonomousSurvey:
                     break
                 self.primary_index += 1
             if stop is None:
-                # 初始路线走完仍未识别，才追加一站；追加站严格使用中距离分离视角。
-                plan, _ = supplementary_route(
-                    pose, offset, intr, watch.pitch, pending=pending,
-                    references=references, failed=self.failed_observations,
-                    excluded_centers=excluded, planner=nearest_observation,
-                    max_stops=2, medium_only=True)
-                if len(plan) > 1:
-                    stop = plan[1]
-                    self.additional_stops.append(stop)
+                # 初始既定路线完成，剩余目标只进行一次最终靠近/补偿观察。
+                self.final_fallback = True
+                self._plan_final_observation(pending, now)
+                return
             goal = Action('blocked','暂无安全中距离补充点')
             if stop is not None:
                 look = stop.looks[0]
@@ -707,7 +779,8 @@ class AutonomousSurvey:
         for name in sorted(DISPLAY, key=lambda n: TOWER_NO[n]):
             vote = watch.votes[name]
             state = vote.locked or "未确认"
-            status = "已识别" if vote.locked is not None else "尚未看清"
+            status = ("兜底推定，非识别确认" if name in self.fallback_zero else
+                      "已识别" if vote.locked is not None else "尚未看清")
             rows.append(f"{TOWER_NO[name]}号：{state}；{status}")
         rows.append(self.message)
         action = self.action
@@ -794,6 +867,7 @@ class AutonomousSurvey:
                     initial_pitch=self.initial_pitch if self.confirmed_start else None,
                     next_action=asdict(self.action) if self.action is not None else None,
                     pending=[n for n,v in self.watch.votes.items() if v.locked is None],
+                    fallback_zero=self.fallback_zero, final_fallback=self.final_fallback,
                     complete=self.complete, results={n: v.locked for n,v in self.watch.votes.items()},
                     route_plan=dict(primary=[asdict(s) for s in self.primary_stops or []],
                                     primary_index=self.primary_index,
