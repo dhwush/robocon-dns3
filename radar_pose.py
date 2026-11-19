@@ -1,6 +1,8 @@
 """雷达位姿接入：使用测量时间，统一输出场地右前角（米、弧度）。"""
 from __future__ import annotations
 
+from car_pose import display_yaw_deg
+
 import json
 import math
 import shlex
@@ -283,5 +285,5 @@ def radar_pose_text(pose):
         return '雷达等待有效位姿：x=-- m y=-- m yaw=--°；暂停识别和计算'
     sampled_at = time.strftime('%m-%d %H:%M:%S', time.localtime(pose.stamp))
     sampled_at += f'.{int(pose.stamp * 1000) % 1000:03d}'
-    return (f'雷达·右前角 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={math.degrees(pose.yaw):+.1f}° '
+    return (f'雷达·右前角 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={display_yaw_deg(pose.yaw):+.1f}° '
             f'采样时刻={sampled_at} 位姿延迟={max(0., time.time()-pose.stamp)*1000:.0f} ms')

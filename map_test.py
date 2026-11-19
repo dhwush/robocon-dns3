@@ -12,6 +12,8 @@ python map_test.py
 
 from __future__ import annotations
 
+from car_pose import display_yaw_deg
+
 import math
 
 from dataclasses import dataclass
@@ -109,7 +111,7 @@ def look_yaw_text(stops: list, arrived: int, look_index: int) -> str | None:
     looks = stops[arrived].looks
     if not looks:
         return None
-    return f"{looks[look_index % len(looks)].yaw_deg:.1f}"
+    return f"{display_yaw_deg(math.radians(looks[look_index % len(looks)].yaw_deg)):.1f}"
 
 
 def open_yaw(yaw_text: str) -> float | None:
@@ -508,7 +510,7 @@ def _open_camera(x: float, y: float, yaw: float, pitch: float, args=None) -> Non
     args = args or SimpleNamespace(mode="extend", pose_source="radar")
     pose = pose_for_corner(x, y, yaw)
     offset = np.zeros(2, dtype=float)
-    print(f"右前角 x={pose.x:.3f} m  y={pose.y:.3f} m  航向 {np.degrees(yaw):.1f} 度")
+    print(f"右前角 x={pose.x:.3f} m  y={pose.y:.3f} m  航向 {display_yaw_deg(yaw):.1f} 度")
     setup = Setup(False, offset, pitch, "", "rad", origin_basic=True)
     watch = FieldWatch(setup, load_intrinsics(str(ROOT / "config" / "intrinsics.yaml")))
     watch.pitch = pitch
@@ -671,7 +673,7 @@ def main() -> None:
             current_radar = radar_stream.match() if radar_stream is not None else None
             if radar_stream is not None:
                 marker = None if current_radar is None else (current_radar.x, current_radar.y)
-                yaw_text = "" if current_radar is None else str(np.degrees(current_radar.yaw))
+                yaw_text = "" if current_radar is None else str(display_yaw_deg(current_radar.yaw))
                 view["auto_yaw"] = None
             if view["auto_yaw"] is not None:
                 yaw_text = str(view["auto_yaw"])
@@ -815,7 +817,7 @@ def main() -> None:
                     if args.pose_source in ('laptop', 'host', 'radar', 'ros'):
                         status = [can_pose_text(current, args.pose_source)]
                     else:
-                        status = [f"手动右前角 x={current.x:+.3f} y={current.y:+.3f} yaw={np.degrees(current.yaw):+.1f}°"]
+                        status = [f"手动右前角 x={current.x:+.3f} y={current.y:+.3f} yaw={display_yaw_deg(current.yaw):+.1f}°"]
                     cv2.imshow("route", _draw_map(None if current is None else (current.x, current.y),
                         None if current is None else current.yaw, getattr(args,"live_pitch",selected_pitch),
                         route_line=route_line, route_stops=route_points,

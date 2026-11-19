@@ -691,8 +691,8 @@ def test_arrival_announces_stop_before_stability_and_next_action(monkeypatch, ki
     watch.stable_frames = 0
     survey.update()
     assert survey.stop_until is not None
-    assert '停止！' in '\n'.join(survey.lines())
-    assert '下一步' not in '\n'.join(survey.lines())
+    assert '短暂停顿后继续下一步' in '\n'.join(survey.lines())
+    assert '尚未开始识别' in '\n'.join(survey.lines())
     assert survey.action.kind == kind
     assert not survey.evidence[name].samples
     clock.now += 1.1
@@ -1285,3 +1285,70 @@ def test_b_start_plans_route_even_when_camera_not_settled(monkeypatch):
     assert not survey.observations
     survey.update()
     assert len(calls) == 1  # 等待停稳不能反复重算路线。
+
+
+def test_backwards_start_without_visible_towers_selects_next_goal_before_settling(monkeypatch):
+    from motion import RouteStop,RouteStops,Look
+    _,watch,clock,name=make_survey(monkeypatch)
+    survey=AutonomousSurvey(watch,clock)
+    survey.wait_for_start()
+    assert survey.confirm_start(CarPose(0.,.2,math.pi),5.)
+    watch.camera_settled=False
+    for view in watch.views.values():
+        view.in_view=False
+    monkeypatch.setattr(autonomous,'supplementary_route',lambda *a,**k:
+        (RouteStops([RouteStop(0.,.2,()),RouteStop(.5,.2,(Look(autonomous.TOWER_NO[name],0.,0.),))]),[]))
+    monkeypatch.setattr(survey,'_advance_observation',lambda: survey.observation_goal is not None)
+    survey.update()
+    assert survey.initial_observation_done
+    assert survey.observation_goal is not None
+    assert '起点视野无可观测塔' in survey.last_observation_outcome
+    assert all(v.locked is None for v in watch.votes.values())
+    assert not survey.observations
+
+
+def test_visible_unknown_start_waits_bounded_time_then_proceeds(monkeypatch):
+    from motion import RouteStop,RouteStops,Look
+    _,watch,clock,name=make_survey(monkeypatch)
+    survey=AutonomousSurvey(watch,clock)
+    survey.confirmed_start=True
+    watch.views[name].conclusion=None
+    monkeypatch.setattr(autonomous,'supplementary_route',lambda *a,**k:
+        (RouteStops([RouteStop(0.,0.,()),RouteStop(.5,0.,(Look(autonomous.TOWER_NO[name],0.,0.),))]),[]))
+    monkeypatch.setattr(survey,'_advance_observation',lambda: survey.observation_goal is not None)
+    survey.update()
+    assert survey.action.kind=='wait'
+    assert survey.observation_goal is None
+    assert not survey.initial_observation_done
+    clock.now=2.1
+    survey.update()
+    assert survey.initial_observation_done
+    assert survey.observation_goal is not None
+    assert '未获得有效结果' in survey.last_observation_outcome
+    assert watch.votes[name].locked is None
+
+
+def test_start_dashboard_after_immediate_update_shows_instruction(monkeypatch):
+    from motion import RouteStop,RouteStops,Look,Action
+    from terminal_ui import terminal_status
+    _,watch,clock,name=make_survey(monkeypatch)
+    survey=AutonomousSurvey(watch,clock)
+    watch.autonomy=survey
+    survey.wait_for_start()
+    for view in watch.views.values():
+        view.in_view=False
+    monkeypatch.setattr(autonomous,'supplementary_route',lambda *a,**k:
+        (RouteStops([RouteStop(0.,.2,()),RouteStop(.5,.2,(Look(autonomous.TOWER_NO[name],0.,0.),))]),[]))
+    def advance():
+        if survey.observation_goal is None:
+            return False
+        survey.action=Action('move','',x=.5,y=.2)
+        return True
+    monkeypatch.setattr(survey,'_advance_observation',advance)
+    assert survey.confirm_start(CarPose(0.,.2,math.pi),5.)
+    survey.update()  # 模式2/3按b处理顺序：规划完成后才显示终端。
+    text='\n'.join(terminal_status(watch,watch.last_pose,watch.pitch)[0])
+    assert '下一位置：x=+0.500 m  y=+0.200 m' in text
+    assert '下一位置观察目标：'+autonomous.TOWER_NO[name]+'号（未完成）' in text
+    assert '正在规划' not in text
+    assert all(v.locked is None for v in watch.votes.values())

@@ -268,3 +268,8 @@ def bearing_deg(point: np.ndarray, pose: CarPose, center_to_corner: np.ndarray) 
         return 0.0
     return float(np.degrees(np.arctan2(right, ahead)))
 
+
+
+def display_yaw_deg(yaw: float) -> float:
+    """将弧度航向转换成 [-180, 180) 度，仅用于显示。"""
+    return (float(np.degrees(yaw)) + 180.0) % 360.0 - 180.0

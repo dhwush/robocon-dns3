@@ -93,10 +93,10 @@ def test_panel_shows_current_pose_safe_waypoint_and_full_observation_goal():
     rows,_,_=terminal_status(watch,CarPose(.1,.15,.3),5.)
     text='\n'.join(rows)
     assert '当前位置：x=+0.100 m  y=+0.150 m  yaw=+17.2°  俯仰=+5.0°' in text
-    assert '当前要求：x=+0.200 m  y=+0.100 m' in text
-    assert '最终观测位置（按下一步命令逐步到达）：x=+0.500 m  y=+0.400 m  yaw=+34.4°  俯仰=+12.0°' in text
-    assert '向右平移' in text
-    assert '本站观察：1号' in text
+    assert '下一位置：x=+0.200 m  y=+0.100 m' in text
+    assert '预览，不可直接前往）：x=+0.500 m  y=+0.400 m  yaw=+34.4°  俯仰=+12.0°' in text
+    assert '本步操作：移动到本步要求的 x/y' in text
+    assert '下一位置观察目标：1号（未完成）' in text
 
 
 def test_yaw_requirement_uses_rotated_right_front_corner():
@@ -107,7 +107,7 @@ def test_yaw_requirement_uses_rotated_right_front_corner():
     watch.autonomy.action=Action('yaw','',yaw=.8,pitch=12.)
     current=CarPose(.1,.2,0.)
     rows,_,_=terminal_status(watch,current,4.)
-    assert '当前要求：'+_pose_text(turned_pose(current,.8),12.) in rows
+    assert '下一位置：'+_pose_text(turned_pose(current,.8),4.) in rows
 
 
 def test_dashboard_refreshes_same_screen_then_identification_and_summary_once():
@@ -122,7 +122,7 @@ def test_dashboard_refreshes_same_screen_then_identification_and_summary_once():
     assert output.getvalue().count('\x1b[H\x1b[J')==2
     watch.votes[DISPLAY[0]].locked='2'
     panel.show(watch,watch.last_pose,5.)
-    assert '识别好了：1号=2；下一步请执行上方命令' in output.getvalue()
+    assert '识别好了：1号=2；请查看本步操作' in output.getvalue()
     panel.finish(watch)
     final=output.getvalue().split('\x1b[?1049l')[-1]
     assert final.count('最终汇总')==1
@@ -153,8 +153,8 @@ def test_missing_pose_and_blocked_path_do_not_suggest_return_to_start():
     watch.autonomy.action=Action('blocked','无安全路径')
     rows,_,_=terminal_status(watch,None,None)
     text='\n'.join(rows)
-    assert '暂停移动和确认' in text
-    assert '当前要求：暂无移动要求' in text
+    assert '暂停识别和确认' in text
+    assert '下一位置：暂无移动要求' in text
     assert '已确认：无' in text
 
 
@@ -240,3 +240,195 @@ def test_ssh_controlling_terminal_with_redirected_stdin(headless):
         if pid is not None:
             os.kill(pid,signal.SIGKILL)
             os.waitpid(pid,0)
+
+
+def test_operator_panel_wraps_yaw_and_separates_plan_from_command():
+    import math
+    from car_pose import CarPose
+    from terminal_ui import terminal_status
+    from dataclasses import replace
+    watch=dashboard_watch()
+    watch.autonomy.observation_goal=replace(watch.autonomy.observation_goal,
+                                          observation_yaw=math.radians(-318.8))
+    text='\n'.join(terminal_status(watch,CarPose(.1,.15,.3),5.)[0])
+    assert 'yaw=+41.2°' in text
+    assert '该目标最终观测姿态（预览，不可直接前往）：x=' in text
+    assert 'Δx=+0.100 m  Δy=-0.050 m' in text
+    assert '向右平移' not in text
+    assert '提示：到达目标后观察' not in text
+
+
+def test_missing_pose_overrides_start_and_hold_commands():
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.awaiting_start=True
+    watch.autonomy.stop_until=123.
+    text='\n'.join(terminal_status(watch,None,None)[0])
+    assert '状态：定位无效' in text
+    assert '本步操作：停止！等待定位恢复' in text
+    assert '下一位置：暂无移动要求' in text
+
+
+def test_yaw_command_explains_corner_motion():
+    from terminal_ui import terminal_status
+    from motion import Action
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('yaw','',yaw=.8)
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '绕车身中心原地转' in text
+    assert '右前角 x/y 会随转动变化' in text
+    assert '位置保持不动' not in text
+
+
+def test_inferred_zero_never_announced_as_identification_success():
+    from io import StringIO
+    from terminal_ui import TerminalDashboard,terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.fallback_zero={DISPLAY[0]:'兜底'}
+    watch.votes[DISPLAY[0]].locked='0'
+    output=StringIO()
+    panel=TerminalDashboard(output,interactive=False)
+    panel.show(watch,watch.last_pose,4.)
+    assert '识别好了：1号' not in output.getvalue()
+    panel.finish(watch)
+    assert '1号：兜底推定0层（非识别确认）' in output.getvalue()
+
+
+def test_panel_distinguishes_current_observation_and_last_outcome():
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.observation_status='本点尚未识别成功'
+    watch.autonomy.last_observation_outcome='上一点已确认2号'
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '当前观测结果：本点尚未识别：请先完成上方本步操作' in text
+    assert '最近观测结论：上一点已确认2号' in text
+    assert '本帧=' not in text
+
+
+@pytest.mark.parametrize('kind', ['yaw','pitch'])
+@pytest.mark.parametrize('error,ok', [(2.99,True),(3.,True),(-3.,True),(3.01,False),(-3.01,False)])
+def test_panel_angle_deadband_matches_arrival(kind,error,ok):
+    import math
+    from car_pose import CarPose
+    from motion import Action
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=Action(kind,'',yaw=0.,pitch=0.)
+    rows,_,_=terminal_status(watch,CarPose(0,0,math.radians(error)),error)
+    label='旋转' if kind=='yaw' else '俯仰'
+    status=next(r for r in rows if r.startswith(label+'：'))
+    command=next(r for r in rows if r.startswith('本步操作：'))
+    assert ('可以了' in status) is ok
+    assert ('可以了' in command) is ok
+
+
+def test_panel_missing_pitch_does_not_claim_arrival():
+    from motion import Action
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('pitch','',pitch=0.)
+    rows,_,_=terminal_status(watch,watch.last_pose,None)
+    assert '俯仰：实测无效，等待反馈' in rows
+
+
+def test_completed_run_does_not_label_last_observation_as_initial_point():
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.complete=True
+    watch.autonomy.observation_goal=None
+    watch.autonomy.action=None
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '本轮已结束，无后续观测位置' in text
+    assert '最终观测位置：当前起点' not in text
+
+
+def test_observation_targets_show_completion_and_start_state():
+    from terminal_ui import terminal_status
+    from motion import Action
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('wait','',cells=(DISPLAY[0],))
+    watch.votes[DISPLAY[0]].locked='2'
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '当前位置观察目标：1号（已完成）' in text
+    watch.votes[DISPLAY[0]].recheck=True
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '当前位置观察目标：1号（未完成）' in text
+    watch.autonomy.awaiting_start=True
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '下一位置：等待起点确认' in text
+    assert '下一位置观察目标：等待起点确认后规划' in text
+    assert '本站观察：' not in text and '最终观测位置：' not in text
+
+
+@pytest.mark.parametrize('data_ready',[True,False])
+def test_empty_start_never_commands_wait_for_recognition(data_ready):
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=None
+    watch.autonomy.observation_goal=None
+    watch.have_color=data_ready
+    watch.views={n:SimpleNamespace(in_view=False,needs_yaw=False,needs_pitch=False)
+                 for n in DISPLAY} if data_ready else {}
+    rows,_,_=terminal_status(watch,watch.last_pose,4.)
+    text='\n'.join(rows)
+    assert '等待当前点识别完成' not in text
+    assert '当前点继续观察' not in text
+    assert '旋转：可以了' not in text
+    if data_ready:
+        assert '下一位置：正在规划' in text
+        assert '跳过起点识别' in text
+    else:
+        assert '等待有效视野数据' in text
+        assert '起点无可观测塔' not in text
+
+
+@pytest.mark.parametrize('kind,label',[('move','本段移动'),('yaw','本次旋转'),('pitch','本次俯仰调整')])
+def test_transition_hold_is_not_presented_as_observation_arrival(kind,label):
+    from motion import Action
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=Action(kind,'',x=0.,y=0.,yaw=0.,pitch=4.)
+    watch.autonomy.stop_until=123.
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '状态：'+label+'已到位，短暂停顿后继续下一步' in text
+    assert '本步操作：结束本次调整，短暂停顿' in text
+    assert '状态：已到位，停止！' not in text
+    assert '尚未开始识别' in text
+
+
+def test_wait_reports_stability_before_recognition():
+    from motion import Action
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('wait','')
+    watch.camera_settled=False
+    watch.confirmation_allowed=False
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '等待相机停稳及有效数据' in text
+    assert '正在识别' not in text
+
+
+def test_hold_has_no_competing_angle_instructions():
+    from motion import Action
+    from terminal_ui import terminal_status
+    watch=dashboard_watch()
+    watch.autonomy.action=Action('yaw','',yaw=1.,pitch=30.)
+    watch.autonomy.stop_until=123.
+    text='\n'.join(terminal_status(watch,watch.last_pose,4.)[0])
+    assert '旋转：' not in text and '俯仰：' not in text
+    assert '当前观测结果：本步调整完成' in text
+
+
+def test_completed_targets_remain_at_current_pose_until_departure():
+    from terminal_ui import TerminalDashboard
+    from car_pose import CarPose
+    from io import StringIO
+    watch=dashboard_watch()
+    output=StringIO()
+    panel=TerminalDashboard(output,interactive=True)
+    panel.show(watch,watch.last_pose,4.)
+    watch.votes[DISPLAY[0]].locked='2'
+    panel.show(watch,watch.last_pose,4.)
+    assert '当前位置观察目标：1号（已完成）' in output.getvalue().split('\x1b[H\x1b[J')[-1]
+    panel.show(watch,CarPose(.1,0,0),4.)
+    assert '当前位置观察目标：1号（已完成）' not in output.getvalue().split('\x1b[H\x1b[J')[-1]

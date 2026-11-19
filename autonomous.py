@@ -1,6 +1,8 @@
 """信任有效识别结果，仅为尚未看清的塔调度观察姿态与安全换位。"""
 from __future__ import annotations
 
+from car_pose import display_yaw_deg
+
 from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
 import math
@@ -112,6 +114,10 @@ class AutonomousSurvey:
         self.distance_pose = watch.last_pose
         self.stop_until = None
         self.stop_message = ""
+        self.initial_observation_done = False
+        self.initial_observation_started = None
+        self.observation_status = "尚未开始观测"
+        self.last_observation_outcome = "尚无完成的观测"
         self.final_fallback = False
         self.fallback_zero = {}
         self.final_goal_names = ()
@@ -152,7 +158,7 @@ class AutonomousSurvey:
         self.__init__(watch, self.clock, stationary_scan=self.stationary_scan)
         self.confirmed_start = True
         self.message = (f'起点已确认：x={pose.x:+.3f} m y={pose.y:+.3f} m '
-                        f'yaw={math.degrees(pose.yaw):+.1f}° 俯仰={pitch:+.1f}°；停稳后开始观测规划')
+                        f'yaw={display_yaw_deg(pose.yaw):+.1f}° 俯仰={pitch:+.1f}°；停稳后开始观测规划')
         return True
 
     def _camera_ready(self):
@@ -160,9 +166,38 @@ class AutonomousSurvey:
                 and getattr(self.watch,'camera_settled',True)
                 and getattr(self.watch,'confirmation_allowed',True))
 
+    def confirmation_reason(self, name):
+        """与自动确认共用条件，终端不能把本帧候选冒充已确认结果。"""
+        watch=self.watch
+        if watch.votes[name].locked is not None:
+            return '兜底推定，非识别确认' if name in self.fallback_zero else '识别成功，已确认'
+        if self.awaiting_start:
+            return '未开始，请按 b'
+        if not watch.have_color or not self._camera_ready():
+            return '等待有效数据和相机停稳'
+        if self.action is not None and self.action.kind in ('move','yaw','pitch'):
+            return '尚未到达观测姿态'
+        view=(watch.views or {}).get(name)
+        if view is None or not view.in_view:
+            return '当前视野内没有该塔'
+        if view.needs_yaw or view.needs_pitch:
+            return '视角不完整，需要调整朝向或俯仰'
+        if view.skip_vote:
+            return view.reason or '识别证据不足，禁止确认'
+        if view.conclusion is None:
+            return view.reason or '当前没有有效识别结果'
+        if not self.stationary_scan:
+            prefs=_observation_preferences(watch.last_pose,watch.setup.center_to_corner,watch.pitch,watch.intr)
+            goal=self.observation_goal
+            if not prefs[name][0] and not (goal is not None and goal.observation_fallback and name in goal.cells):
+                return '距离或遮挡不满足本次观测条件'
+        return None
+
     def confirmation_target(self):
         action = self.action
         if action is None or action.kind != 'wait' or action.cell in self.manual_confirmed:
+            return None
+        if self.confirmation_reason(action.cell) is not None and self.watch.votes[action.cell].locked is None:
             return None
         view = self.watch.views[action.cell]
         if not self.watch.have_color or not self._camera_ready() or not view.in_view:
@@ -183,6 +218,9 @@ class AutonomousSurvey:
         self.conflicts.pop(name, None)
         self.conflict_results.pop(name, None)
         self.evidence[name].clear()
+        self.fallback_zero.pop(name,None)
+        self.last_observation_outcome = f'{TOWER_NO[name]}号识别成功，已手动确认：{result}'
+        self.observation_status = self.last_observation_outcome
         self._record(name, 'manual_confirmed', result, self.clock(), previous)
         self.look_key = self.look_started = None
         self.action = None
@@ -343,14 +381,14 @@ class AutonomousSurvey:
                 self.action = Action('blocked', '联合观测姿态暂无安全路线')
                 return True
             self.action = _move_toward(pose, move_target.x, move_target.y, trip[1], 'joint', names)
-        elif abs((math.degrees(target.yaw-pose.yaw)+180)%360-180) > YAW_TOL_DEG:
+        elif abs((math.degrees(target.yaw-pose.yaw)+180)%360-180) > YAW_TOL_DEG + 1e-9:
             if not _right_front_turn_clear(pose,target.yaw):
                 self.observation_goal = None
                 self.action = Action('blocked','转向过程中右前点会越过左右边界，保留未识别目标')
                 return True
             self.action = Action('yaw', '转到联合观测朝向', yaw=target.yaw,
                                  pitch=goal.observation_pitch, cell=names[0], cells=names)
-        elif abs(goal.observation_pitch-watch.pitch) > PITCH_TOL_DEG:
+        elif abs(goal.observation_pitch-watch.pitch) > PITCH_TOL_DEG + 1e-9:
             self.action = Action('pitch', '调到联合观测俯仰', yaw=target.yaw,
                                  pitch=goal.observation_pitch, cell=names[0], cells=names)
         else:
@@ -375,7 +413,7 @@ class AutonomousSurvey:
             if not self.watch._arrived(action):
                 return False
             words = {'move': '本段移动到位', 'yaw': '完成旋转', 'pitch': '俯仰到位'}
-            self.stop_message = words[action.kind] + '，可以了，停止！保持车身和相机不动，等待稳定'
+            self.stop_message = words[action.kind] + '，结束本次调整，短暂停顿后继续下一步；尚未开始识别'
             self.stop_until = now + STOP_HOLD_SECONDS
             # 到位后的新采样单独验证停稳；只在进入停止等待时重置一次。
             watch = self.watch
@@ -456,7 +494,17 @@ class AutonomousSurvey:
             self.anchor, self.anchor_pitch, self.anchor_roll = pose, watch.pitch, watch.roll
             for evidence in self.evidence.values():
                 evidence.clear()
+        initial_visible = [n for n,v in (watch.views or {}).items()
+                           if v.in_view and not v.needs_yaw and not v.needs_pitch]
+        if self.confirmed_start and not self.initial_observation_done and not initial_visible and watch.have_color:
+            self.initial_observation_done = True
+            self.last_observation_outcome = '起点视野无可观测塔（可能背对建塔区），未识别；转入后续观测点'
+            self.observation_status = self.last_observation_outcome
+            self._schedule(now)
+            return
         if not watch.have_color or not self._camera_ready():
+            if self.confirmed_start and not self.initial_observation_done:
+                self.initial_observation_started = None
             self.final_valid_start = self.final_valid_last = None
             self.final_valid_samples = 0
             for evidence in self.evidence.values():
@@ -498,8 +546,7 @@ class AutonomousSurvey:
                 vote.recheck = False
                 evidence.clear()
                 continue
-            if (not view.in_view or view.needs_yaw or view.needs_pitch
-                    or view.skip_vote or view.conclusion is None):
+            if self.confirmation_reason(name) is not None:
                 evidence.clear()
                 continue
             if preferences is not None and not preferences[name][0]:
@@ -511,6 +558,8 @@ class AutonomousSurvey:
             self.conflicts.pop(name, None)
             self.conflict_results.pop(name, None)
             evidence.clear()
+            self.last_observation_outcome = f'{TOWER_NO[name]}号识别成功，已确认：{result}'
+            self.observation_status = self.last_observation_outcome
             self._record(name, "confirmed", result, now)
             self._note_observation([name], now, self.attempts[name])
             if self.action is not None and (self.action.cell == name
@@ -519,6 +568,20 @@ class AutonomousSurvey:
                 self.look_key = self.look_started = None
                 self.blocked_until = 0.0
             self.attempts[name] = 0
+        if self.confirmed_start and not self.initial_observation_done:
+            if self.initial_observation_started is None:
+                self.initial_observation_started = now
+            remaining = [n for n in initial_visible if watch.votes[n].locked is None]
+            if remaining and now-self.initial_observation_started < POINT_LOOK_SECONDS:
+                self.action = Action('wait','起点观测',cell=remaining[0],cells=tuple(remaining))
+                self.observation_status = '起点已停稳，正在识别；尚未识别成功'
+                self.message = self.observation_status
+                return
+            self.initial_observation_done = True
+            confirmed = [TOWER_NO[n]+'号' for n in initial_visible if watch.votes[n].locked is not None]
+            self.last_observation_outcome = ('起点观测完成：已确认'+ '、'.join(confirmed) if confirmed
+                                            else '起点观测结束：未获得有效结果，保持未知；执行后续点')
+            self.observation_status = self.last_observation_outcome
         self._schedule(now)
 
     def _expire_look(self, now):
@@ -559,6 +622,8 @@ class AutonomousSurvey:
                 y=goal.observation_y, yaw_deg=math.degrees(goal.observation_yaw),
                 pitch_deg=goal.observation_pitch))
             self.observation_goal = None
+        self.last_observation_outcome = '本点观测结束：未识别目标仍保持未知，切换后续观测'
+        self.observation_status = self.last_observation_outcome
         view = self.watch.views[name]
         # 已停稳观察仍缺前后分离证据，原地换21档不能产生视差；转入换位流程。
         if view.conclusion is None and (view.needs_parallax
@@ -798,7 +863,7 @@ class AutonomousSurvey:
             pitch = action.pitch if action.pitch is not None else watch.pitch
             target_names = action.cells or ((action.cell,) if action.cell else ())
             # 移动阶段先给出下一安全折点，再给出最终观察姿态。
-            rows.append(f"下一步（场地原点/右前角）：x={x:+.3f} m y={y:+.3f} m yaw={math.degrees(yaw):+.1f}° 俯仰={pitch:+.1f}°")
+            rows.append(f"下一步（场地原点/右前角）：x={x:+.3f} m y={y:+.3f} m yaw={display_yaw_deg(yaw):+.1f}° 俯仰={pitch:+.1f}°")
             if action.kind == "yaw":
                 turn = math.degrees(math.atan2(math.sin(yaw-pose.yaw), math.cos(yaw-pose.yaw)))
                 if abs(turn) <= 3.0:
@@ -821,11 +886,11 @@ class AutonomousSurvey:
                 rows.append(f"观察落点：x={stood.x:+.3f} m y={stood.y:+.3f} m")
                 if self.observation_goal is None:
                     for look in _looks(stood, watch.setup.center_to_corner, watch.intr, target_names):
-                        rows.append(f"{look.number}号：yaw={look.yaw_deg:+.1f}° 俯仰={look.pitch_deg:+.1f}°")
+                        rows.append(f"{look.number}号：yaw={display_yaw_deg(math.radians(look.yaw_deg)):+.1f}° 俯仰={look.pitch_deg:+.1f}°")
             if self.observation_goal is not None:
                 goal = self.observation_goal
                 rows.append(f"本次完整观测姿态：x={goal.observation_x:+.3f} m y={goal.observation_y:+.3f} m "
-                            f"yaw={math.degrees(goal.observation_yaw):+.1f}° 俯仰={goal.observation_pitch:+.1f}°；全部到位后计一次观测")
+                            f"yaw={display_yaw_deg(goal.observation_yaw):+.1f}° 俯仰={goal.observation_pitch:+.1f}°；全部到位后计一次观测")
             if target_names:
                 rows.append("观察任务：" + "、".join(str(TOWER_NO[n])+"号" for n in target_names))
         if self.complete:
@@ -863,6 +928,9 @@ class AutonomousSurvey:
                     camera_stability=(self.watch.camera_stability.summary()
                                       if hasattr(self.watch,"camera_stability") else None),
                     camera_ready=self._camera_ready(),
+                    observation_status=self.observation_status,
+                    last_observation_outcome=self.last_observation_outcome,
+                    initial_observation_done=self.initial_observation_done,
                     initial_pose=asdict(self.initial_pose) if self.initial_pose is not None else None,
                     initial_pitch=self.initial_pitch if self.confirmed_start else None,
                     next_action=asdict(self.action) if self.action is not None else None,

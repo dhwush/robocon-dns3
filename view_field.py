@@ -14,6 +14,8 @@ python view_field.py extend
 
 from __future__ import annotations
 
+from car_pose import display_yaw_deg
+
 import argparse
 import os
 import sys
@@ -135,13 +137,13 @@ def can_pose_text(pose: CarPose | None, source: str) -> str:
         return radar_pose_text(pose)
     label = "SSH CAN" if source == "ssh" else "离线手动" if source == "static" else "CAN"
     if source == "static":
-        return f"离线手动 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={np.degrees(pose.yaw):+.1f}°" if pose else "离线手动：无位姿"
+        return f"离线手动 x={pose.x:+.3f} m y={pose.y:+.3f} m yaw={display_yaw_deg(pose.yaw):+.1f}°" if pose else "离线手动：无位姿"
     if pose is None:
         return f"{label} 等待位姿 / 数据超时：x=-- m  y=-- m  yaw=--°"
     label += " 已校准场地位姿"
     age = max(0.0, time.monotonic() - pose.stamp) * 1000
     return (f"{label} 当前右前角：x={pose.x:+.3f} m  y={pose.y:+.3f} m  "
-            f"yaw={np.degrees(pose.yaw):+.1f}°  数据年龄={age:.0f} ms")
+            f"yaw={display_yaw_deg(pose.yaw):+.1f}°  数据年龄={age:.0f} ms")
 
 
 def live_panels(watch, pose, source, extras=()):
@@ -719,7 +721,7 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             painted = window_pitch_lines(shown_pitch, watch.required_pitch()) + shown
             if fixed_targets and watch.autonomy is None:
                 painted = window_pitch_lines(shown_pitch, None) + ["固定计划（目标角度保持）："] + fixed_targets + shown
-            painted.append(f"位姿 {source}: x={current.x:.3f} m y={current.y:.3f} m 旋转={np.degrees(current.yaw):.1f}°")
+            painted.append(f"位姿 {source}: x={current.x:.3f} m y={current.y:.3f} m 旋转={display_yaw_deg(current.yaw):.1f}°")
             if verify_motion and initial_radar_pose is not None:
                 dx = current.x - initial_radar_pose.x
                 dy = current.y - initial_radar_pose.y
@@ -757,6 +759,9 @@ def _live(args, watch: FieldWatch, pose: CarPose) -> list[str]:
             if start_requested:
                 # current与measured来自同一组已配对的相机/雷达数据。
                 if watch.autonomy.confirm_start(current, measured):
+                    # 确认后先规划/调度，再刷新终端，避免展示没有指令的中间状态。
+                    # confirm_start已清空停稳采样，update不会绕过停稳门槛确认结果。
+                    watch.autonomy.update()
                     args.autonomous_route = watch.autonomy.route_display()
                     args.autonomous_map_lines = [watch.autonomy.message]
                     watch.autonomy.save(args.survey_report)
